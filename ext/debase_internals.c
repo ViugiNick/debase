@@ -493,7 +493,7 @@ Debase_setup_tracepoints(VALUE self)
   breakpoints = rb_ary_new();
   catchpoints = rb_hash_new();
 
-  tpLine = rb_tracepoint_new(Qnil, RUBY_EVENT_LINE, process_line_event, NULL);
+  tpLine = rb_tracepoint_new(Qnil, RUBY_EVENT_SPECIFIED_LINE, process_line_event, NULL);
   rb_global_variable(&tpLine);
 
   tpReturn = rb_tracepoint_new(Qnil, RUBY_EVENT_RETURN | RUBY_EVENT_B_RETURN | RUBY_EVENT_C_RETURN | RUBY_EVENT_END,
@@ -648,6 +648,91 @@ Debase_enable_file_filtering(VALUE self, VALUE value)
   return value;
 }
 
+struct set_specifc_data {
+    int pos;
+    int set;
+    int prev; /* 1: set, 2: unset, 0: not found */
+};
+
+static int
+my_line_trace_specify(int line, rb_event_flag_t *events_ptr, void *ptr)
+{
+    struct set_specifc_data *data = (struct set_specifc_data *)ptr;
+
+    if (data->pos == line) {
+        data->prev = *events_ptr & RUBY_EVENT_SPECIFIED_LINE ? 1 : 2;
+        if (data->set) {
+            *events_ptr = *events_ptr | RUBY_EVENT_SPECIFIED_LINE;
+        }
+        else {
+            *events_ptr = *events_ptr & ~RUBY_EVENT_SPECIFIED_LINE;
+        }
+        return 0; /* found */
+    }
+    else {
+	    return 1;
+    }
+}
+
+VALUE
+my_rb_iseqw_line_trace_specify(VALUE iseqval, int needed_line, VALUE set)
+{
+    struct set_specifc_data data;
+
+    data.prev = 0;
+    data.pos = needed_line;
+    if (data.pos < 0) rb_raise(rb_eTypeError, "`pos' is negative");
+
+    switch (set) {
+      case Qtrue:  data.set = 1; break;
+      case Qfalse: data.set = 0; break;
+      default:
+	    rb_raise(rb_eTypeError, "`set' should be true/false");
+    }
+
+    rb_iseqw_line_trace_each(iseqval, my_line_trace_specify, (void *)&data);
+
+    return data.prev == 1 ? Qtrue : Qfalse;
+}
+
+static void
+c_specify_line_breakpoint(unsigned int lineno, rb_iseq_t *iseq, VALUE flag)
+{
+    int i;
+    VALUE *code;
+    VALUE str = rb_str_new(0, 0);
+    VALUE child = rb_ary_tmp_new(3);
+    unsigned int size;
+    size_t n;
+
+    size = iseq->body->line_info_size;
+    const struct iseq_line_info_entry *table = iseq->body->line_info_table;
+
+    size = iseq->body->iseq_size;
+
+    code = rb_iseq_original_iseq(iseq);
+    fprintf(stderr, "**1");
+    for (n = 0; n < size;) {
+        n += rb_iseq_disasm_insn(str, code, n, iseq, child);
+    }
+
+    my_rb_iseqw_line_trace_specify(rb_iseqw_new(iseq), lineno, flag);
+
+    for (i = 0; i < RARRAY_LEN(child); i++) {
+        VALUE isv = rb_ary_entry(child, i);
+        rb_iseq_t *tmp_iseq = rb_iseq_check((rb_iseq_t *)isv);
+        c_specify_line_breakpoint(lineno, tmp_iseq, flag);
+    }
+}
+
+
+
+static VALUE
+Debase_specify_line_breakpoint(VALUE self, VALUE rb_iseq, VALUE line, VALUE flag)
+{
+    c_specify_line_breakpoint(FIX2UINT(line), rb_iseqw_to_iseq(rb_iseq), flag);
+}
+
 static VALUE
 Debase_init_variables()
 {
@@ -678,6 +763,7 @@ Init_debase_internals()
 {
   mDebase = rb_define_module("Debase");
   rb_define_module_function(mDebase, "setup_tracepoints", Debase_setup_tracepoints, 0);
+  rb_define_module_function(mDebase, "specify_line_breakpoint", Debase_specify_line_breakpoint, 3);
   rb_define_module_function(mDebase, "remove_tracepoints", Debase_remove_tracepoints, 0);
   rb_define_module_function(mDebase, "current_context", Debase_current_context, 0);
   rb_define_module_function(mDebase, "debug_load", Debase_debug_load, -1);

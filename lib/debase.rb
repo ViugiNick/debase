@@ -30,10 +30,21 @@ module Debase
       breakpoint = Breakpoint.new(file, line, expr)
       breakpoints << breakpoint
       enable_trace_points
+      puts "iseq for #{file}:#{line}"
+      iseq = RubyVM::InstructionSequence.compile_file(file)
+      #puts iseq.disasm
+      specify_line_breakpoint(iseq, line, true)
       breakpoint
     end
 
     def remove_breakpoint(id)
+      breakpoint = breakpoints[id]
+      file = breakpoint.source
+      file = breakpoint.pos
+
+      iseq = RubyVM::InstructionSequence.compile_file(file)
+      specify_line_breakpoint(iseq, line, false)
+
       Breakpoint.remove breakpoints, id
     end
 
