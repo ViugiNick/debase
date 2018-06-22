@@ -3,6 +3,11 @@
 
 #include <ruby.h>
 #include <ruby/debug.h>
+#include <vm_core.h>
+#include <version.h>
+#include <iseq.h>
+#include <vm_insnhelper.h>
+#include <method.h>
 
 typedef struct rb_trace_arg_struct rb_trace_point_t;
 
@@ -98,12 +103,19 @@ extern VALUE enable_trace_points();
 /* types */
 typedef struct
 {
-  VALUE enabled;
-  VALUE source;
   VALUE expr;
+
+  char* source;
   int line;
   int id;
 } breakpoint_t;
+
+typedef struct node
+{
+  breakpoint_t* breakpoint;
+  struct node * next;
+
+} breakpoint_list_node_t;
 
 extern VALUE catchpoint_hit_count(VALUE catchpoints, VALUE exception, VALUE *exception_name);
 extern VALUE breakpoint_find(VALUE breakpoints, VALUE source, VALUE pos, VALUE trace_point);

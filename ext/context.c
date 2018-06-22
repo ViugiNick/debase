@@ -71,7 +71,7 @@ fill_stack(debug_context_t *context, const rb_debug_inspector_t *inspector) {
 
 extern void
 clear_stack(debug_context_t *context)
-{  
+{
   debug_frame_t *frame;
   debug_frame_t *prev;
 
@@ -84,32 +84,32 @@ clear_stack(debug_context_t *context)
   context->stack = NULL;
 }
 
-static inline VALUE 
-Context_stack_size(VALUE self) 
+static inline VALUE
+Context_stack_size(VALUE self)
 {
   debug_context_t *context;
   Data_Get_Struct(self, debug_context_t, context);
   return INT2FIX(context->stack_size);
 }
 
-static inline VALUE 
-Context_thread(VALUE self) 
+static inline VALUE
+Context_thread(VALUE self)
 {
   debug_context_t *context;
   Data_Get_Struct(self, debug_context_t, context);
   return context->thread;
 }
 
-static inline VALUE 
-Context_dead(VALUE self) 
+static inline VALUE
+Context_dead(VALUE self)
 {
   debug_context_t *context;
   Data_Get_Struct(self, debug_context_t, context);
   return IS_THREAD_ALIVE(context->thread) ? Qfalse : Qtrue;
 }
 
-extern VALUE 
-Context_ignored(VALUE self) 
+extern VALUE
+Context_ignored(VALUE self)
 {
   debug_context_t *context;
 
@@ -118,8 +118,8 @@ Context_ignored(VALUE self)
   return CTX_FL_TEST(context, CTX_FL_IGNORE) ? Qtrue : Qfalse;
 }
 
-static void 
-Context_mark(debug_context_t *context) 
+static void
+Context_mark(debug_context_t *context)
 {
   debug_frame_t *frame;
 
@@ -135,33 +135,25 @@ Context_mark(debug_context_t *context)
 
 static void
 Context_free(debug_context_t *context) {
-  xfree(context->init_stack_files);
   xfree(context);
+}
+
+static void debug_class_print(VALUE v) {
+    ID sym_puts = rb_intern("puts");
+    ID sym_inspect = rb_intern("class");
+    rb_funcall(rb_mKernel, sym_puts, 1,
+        rb_funcall(v, sym_inspect, 0));
 }
 
 extern VALUE
 context_create(VALUE thread, VALUE cDebugThread) {
   debug_context_t *context;
   VALUE locations;
-  VALUE location;
-  VALUE path;
-  VALUE lineno;
 
   context = ALLOC(debug_context_t);
   context->stack_size = 0;
   locations = rb_funcall(thread, rb_intern("backtrace_locations"), 1, INT2FIX(1));
-  context->init_stack_size = context->calced_stack_size = locations != Qnil ? RARRAY_LENINT(locations) : 0;
-
-  context->init_stack_files = ruby_xmalloc2((context->init_stack_size),sizeof(char*));
-  
-  int i;
-  for (i = 0; i < context->init_stack_size; i++) {
-    location = rb_ary_entry(locations, i);
-    path = rb_funcall(location, rb_intern("path"), 0);
-    lineno = rb_funcall(location, rb_intern("lineno"), 0);
-    context->init_stack_files[i] = path != Qnil ? RSTRING_PTR(path) : "";
-  }
-
+  context->calced_stack_size = locations != Qnil ? RARRAY_LENINT(locations) : 0;
 
   context->stack = NULL;
   context->thnum = ++thnum_current;
@@ -263,7 +255,7 @@ Context_stop_reason(VALUE self)
     const char *symbol;
 
     Data_Get_Struct(self, debug_context_t, context);
-    
+
     switch(context->stop_reason)
     {
         case CTX_STOP_STEP:
@@ -281,7 +273,7 @@ Context_stop_reason(VALUE self)
     }
     if(CTX_FL_TEST(context, CTX_FL_DEAD))
         symbol = "post-mortem";
-    
+
     return ID2SYM(rb_intern(symbol));
 }
 
@@ -313,10 +305,10 @@ Context_stop_next(int argc, VALUE *argv, VALUE self)
   if(FIX2INT(steps) < 0) rb_raise(rb_eRuntimeError, "Steps argument can't be negative.");
 
   Data_Get_Struct(self, debug_context_t, context);
-  
+
   context->stop_next = FIX2INT(steps);
-  
-  
+
+
   if(RTEST(force))
       CTX_FL_SET(context, CTX_FL_FORCE_MOVE);
   else
@@ -363,7 +355,7 @@ Context_stop_frame(VALUE self, VALUE frame)
   debug_context_t *debug_context;
 
   Data_Get_Struct(self, debug_context_t, debug_context);
-  
+
   if(FIX2INT(frame) < 0 && FIX2INT(frame) >= debug_context->calced_stack_size)
     rb_raise(rb_eRuntimeError, "Stop frame is out of range.");
   /* we decrease stack size by frame and 1 because we use stop_frame after
@@ -423,9 +415,9 @@ Init_context(VALUE mDebase)
     // rb_define_method(cContext, "frame_id", context_frame_id, -1);
     // rb_define_method(cContext, "frame_locals", context_frame_locals, -1);
     // rb_define_method(cContext, "frame_method", context_frame_id, -1);
-    // rb_define_method(cContext, "breakpoint", 
+    // rb_define_method(cContext, "breakpoint",
     //          context_breakpoint, 0);      /* in breakpoint.c */
-    // rb_define_method(cContext, "set_breakpoint", 
+    // rb_define_method(cContext, "set_breakpoint",
     //          context_set_breakpoint, -1); /* in breakpoint.c */
     // rb_define_method(cContext, "jump", context_jump, 2);
     // rb_define_method(cContext, "pause", context_pause, 0);

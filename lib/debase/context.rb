@@ -18,8 +18,8 @@ module Debase
       Debase.handler or raise "No interface loaded"
     end
 
-    def at_breakpoint(breakpoint)
-      handler.at_breakpoint(self, breakpoint)
+    def at_breakpoint(id)
+      handler.at_breakpoint(self, Debase.breakpoints[id])
     end
 
     def at_catchpoint(excpt)

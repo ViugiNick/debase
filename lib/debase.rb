@@ -5,31 +5,59 @@ else
 end
 require "debase/version"
 require "debase/context"
+require "debase/breakpoint"
 
 module Debase
   class << self
     attr_accessor :handler
 
     alias start_ setup_tracepoints
-    alias stop remove_tracepoints
+    # alias stop remove_tracepoints
 
     # possibly deprecated options
     attr_accessor :keep_frame_binding, :tracing
 
+    module InstructionSequenceMixin
+      def load_iseq(path)
+        #$stderr.puts "def load_iseq(#{path})"
+        iseq = RubyVM::InstructionSequence.compile_file(path)
+
+        Debugger.handle_iseq(path, iseq);
+        iseq
+      end
+
+      def do_load_iseq(iseq)
+        Debugger.check_iseq(iseq)
+        iseq.each_child{|child_iseq| do_load_iseq(child_iseq)}
+      end
+    end
+
+    def mp_load_iseq
+      #$stderr.puts 'mp_load_iseq'
+
+      class << RubyVM::InstructionSequence
+        prepend InstructionSequenceMixin
+      end
+    end
+
     def start(options={}, &block)
+      #$stderr.puts 'Start'
       Debugger.const_set('ARGV', ARGV.clone) unless defined? Debugger::ARGV
       Debugger.const_set('PROG_SCRIPT', $0) unless defined? Debugger::PROG_SCRIPT
       Debugger.const_set('INITIAL_DIR', Dir.pwd) unless  defined? Debugger::INITIAL_DIR
-      return Debugger.started? ? block && block.call(self) : Debugger.start_(&block) 
+      return Debugger.started? ? block && block.call(self) : Debugger.start_(&block)
     end
 
-    # @param [String] file
-    # @param [Fixnum] line
-    # @param [String] expr
+    # # @param [String] file
+    # # @param [Fixnum] line
+    # # @param [String] expr
     def add_breakpoint(file, line, expr=nil)
-      breakpoint = Breakpoint.new(file, line, expr)
-      breakpoints << breakpoint
-      enable_trace_points
+      id = do_add_breakpoint(file, line, expr)
+
+      #$stderr.puts "Breakpoint id=#{id}"
+
+      breakpoint = Breakpoint.new(id, file, line, expr)
+      breakpoints[id] = breakpoint
       breakpoint
     end
 
