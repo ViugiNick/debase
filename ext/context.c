@@ -297,6 +297,7 @@ Context_pause(VALUE self)
 static VALUE
 Context_stop_next(int argc, VALUE *argv, VALUE self)
 {
+  fprintf(stderr, "Context_stop_next\n");
   VALUE steps;
   VALUE force;
   debug_context_t *context;

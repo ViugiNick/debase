@@ -261,6 +261,59 @@ c_add_breakpoint(unsigned int lineno, rb_iseq_t *iseq)
     }
 }
 
+static void walk_throw_frames(rb_thread_t *th, char* source, int line)
+{
+        rb_control_frame_t *last_cfp = th->cfp;
+        rb_control_frame_t *start_cfp = RUBY_VM_END_CONTROL_FRAME(th);
+        rb_control_frame_t *cfp;
+        ptrdiff_t size, i;
+
+        start_cfp =
+          RUBY_VM_NEXT_CONTROL_FRAME(
+    	  RUBY_VM_NEXT_CONTROL_FRAME(start_cfp));
+
+        if (start_cfp < last_cfp) {
+    	    size = 0;
+        }
+        else {
+    	    size = start_cfp - last_cfp + 1;
+        }
+
+
+        for (i = 0, cfp = start_cfp; i < size; i++, cfp = RUBY_VM_NEXT_CONTROL_FRAME(cfp)) {
+            if (cfp->iseq) {
+                if (cfp->pc) {
+                    const rb_iseq_t *iseq = cfp->iseq;
+                    char* file = RSTRING_PTR(StringValue(iseq->body->location.path));
+
+                    fprintf(stderr, "%s %s\n", source, file);
+
+                    if(strcmp (source, file) == 0) {
+                        c_add_breakpoint(line, iseq);
+                        break;
+                    }
+                }
+    	    }
+    	}
+}
+
+static void walk_throw_threads(char* source, int line)
+{
+    rb_vm_t *vm = GET_THREAD()->vm;
+    rb_thread_t *th = 0;
+
+    list_for_each(&vm->living_threads, th, vmlt_node) {
+            switch (th->status) {
+              case THREAD_RUNNABLE:
+              case THREAD_STOPPED:
+              case THREAD_STOPPED_FOREVER:
+                walk_throw_frames(th, source, line);
+              default:
+                continue;
+            }
+        }
+}
+
 static VALUE
 Debase_add_breakpoint(VALUE self, VALUE source, VALUE line, VALUE expr)
 {
@@ -278,6 +331,8 @@ Debase_add_breakpoint(VALUE self, VALUE source, VALUE line, VALUE expr)
     breakpoint_node->breakpoint = breakpoint;
     breakpoint_node->next = breakpoint_list;
     breakpoint_list = breakpoint_node;
+
+    walk_throw_threads(breakpoint->source, breakpoint->line);
 
     return INT2NUM(breakpoint->id);
 }

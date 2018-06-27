@@ -19,7 +19,7 @@ module Debase
 
     module InstructionSequenceMixin
       def load_iseq(path)
-        #$stderr.puts "def load_iseq(#{path})"
+        puts "load_iseq #{path}"
         iseq = RubyVM::InstructionSequence.compile_file(path)
 
         Debugger.handle_iseq(path, iseq);
@@ -52,9 +52,11 @@ module Debase
     # # @param [Fixnum] line
     # # @param [String] expr
     def add_breakpoint(file, line, expr=nil)
-      id = do_add_breakpoint(file, line, expr)
+      #puts $"
+      $".delete(file)
+      #puts $"
 
-      #$stderr.puts "Breakpoint id=#{id}"
+      id = do_add_breakpoint(file, line, expr)
 
       breakpoint = Breakpoint.new(id, file, line, expr)
       breakpoints[id] = breakpoint
