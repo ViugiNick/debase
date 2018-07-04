@@ -5,6 +5,8 @@ static int thnum_current = 0;
 
 static VALUE idAlive;
 
+#define ruby_current_thread ((rb_thread_t *)RTYPEDDATA_DATA(rb_thread_current()))
+
 /* "Step", "Next" and "Finish" do their work by saving information
    about where to stop next. reset_stopping_points removes/resets this
    information. */
@@ -301,6 +303,16 @@ Context_stop_next(int argc, VALUE *argv, VALUE self)
   VALUE steps;
   VALUE force;
   debug_context_t *context;
+
+  rb_thread_t *thread = ruby_current_thread;
+  rb_control_frame_t *last_cfp = th->cfp;
+  rb_iseq_t *iseq = cfp->iseq;
+
+  code = rb_iseq_original_iseq(iseq);
+  for (n = 0; n < size;) {
+    rb_str_cat(str, indent_str, indent_len);
+    n += rb_iseq_disasm_insn(str, code, n, iseq, child);
+  }
 
   rb_scan_args(argc, argv, "11", &steps, &force);
   if(FIX2INT(steps) < 0) rb_raise(rb_eRuntimeError, "Steps argument can't be negative.");
