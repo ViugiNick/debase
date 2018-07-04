@@ -94,12 +94,12 @@ static void debug_class_print(VALUE v) {
 }
 
 static VALUE
-Debase_thread_context(VALUE self, VALUE thread)
+Debase_thread_context(VALUE self, VALUE thread, rb_thread_t *c_thread)
 {
   VALUE context;
   context = rb_hash_aref(contexts, thread);
   if (context == Qnil) {
-    context = context_create(thread, cDebugThread);
+    context = context_create(thread, c_thread, cDebugThread);
     debug_class_print(context);
     rb_hash_aset(contexts, thread, context);
   }
@@ -109,7 +109,7 @@ Debase_thread_context(VALUE self, VALUE thread)
 static VALUE
 Debase_current_context(VALUE self)
 {
-  return Debase_thread_context(self, rb_thread_current());
+  return Debase_thread_context(self, rb_thread_current(), rb_thread_current());
 }
 
 static breakpoint_t* find_breakpoint_by_pos(char* path, int line) {
