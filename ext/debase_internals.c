@@ -173,6 +173,23 @@ call_at_line(debug_context_t *context, char *file, int line, VALUE context_objec
   rb_funcall(context_object, idAtLine, 2, rb_str_new2(file), INT2FIX(line));
 }
 
+static void debug_print(VALUE v) {
+    ID sym_puts = rb_intern("puts");
+    rb_funcall(rb_mKernel, sym_puts, 1, v);
+}
+
+rb_control_frame_t *
+my_rb_vm_get_binding_creatable_next_cfp(const rb_thread_t *th, const rb_control_frame_t *cfp)
+{
+    while (!RUBY_VM_CONTROL_FRAME_STACK_OVERFLOW_P(th, cfp)) {
+        if (cfp->iseq) {
+            return (rb_control_frame_t *)cfp;
+        }
+	    cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
+    }
+    return 0;
+}
+
 static void
 process_line_event(VALUE trace_point, void *data)
 {
@@ -184,7 +201,8 @@ process_line_event(VALUE trace_point, void *data)
     rb_trace_point_t *tp;
     char *file;
     int line;
-
+    int n;
+    char type;
 
     tp = TRACE_POINT;
     path = rb_tracearg_path(tp);
@@ -200,6 +218,63 @@ process_line_event(VALUE trace_point, void *data)
     context_object = Debase_current_context(mDebase);
     Data_Get_Struct(context_object, debug_context_t, context);
 
+    rb_thread_t *thread;
+    rb_control_frame_t *cfp;
+    thread = ruby_current_thread;
+    cfp = TH_CFP(thread);
+
+    fprintf(stderr, "#1\n");
+
+    //cfp += 1;
+    cfp = my_rb_vm_get_binding_creatable_next_cfp(thread, cfp);
+
+    if(cfp->iseq != NULL)
+    {
+        if(cfp->pc == NULL || cfp->iseq->body == NULL)
+        {
+            fprintf(stderr, "shit\n");
+        }
+        else
+        {
+            const rb_iseq_t *iseq = cfp->iseq;
+            VALUE* code = rb_iseq_original_iseq(iseq);
+
+            char* file = RSTRING_PTR(StringValue(iseq->body->location.path));
+            //fprintf(stderr, "iseq file %s\n", file);
+
+            ptrdiff_t pc = cfp->pc - cfp->iseq->body->iseq_encoded;
+            unsigned int size = cfp->iseq->body->iseq_size;
+            //fprintf(stderr, "iseq file %s\n", file);
+            //fprintf(stderr, "iseq size %d\n", size);
+            const VALUE *iseq_original = rb_iseq_original_iseq((rb_iseq_t *)iseq);
+
+            for (n = pc; n < size;) {
+            	VALUE insn = iseq_original[n];
+                const char *types = insn_op_types(insn);
+
+                for (int j = 0; type = types[j]; j++) {
+                    VALUE op = code[n + j + 1];
+
+                    if(type == 0) {
+                        n = size;
+                        break;
+                    }
+
+                    if(type == TS_CALLINFO) {
+                        struct rb_call_info *ci = (struct rb_call_info *)op;
+
+                        if (ci->mid) {
+                            fprintf(stderr, "command %s\n", insn_name(insn));
+
+                            debug_print(rb_sprintf("mid:%"PRIsVALUE, rb_id2str(ci->mid)));
+                        }
+                    }
+                }
+
+            	n += insn_len(insn);
+            }
+        }
+    }
 
     context->stop_reason = CTX_STOP_BREAKPOINT;
 

@@ -9,6 +9,9 @@
 #include <vm_insnhelper.h>
 #include <method.h>
 
+#include "insns.inc"
+#include "insns_info.inc"
+
 typedef struct rb_trace_arg_struct rb_trace_point_t;
 
 /* Debase::Context */

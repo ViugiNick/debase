@@ -329,9 +329,14 @@ Context_stop_next(int argc, VALUE *argv, VALUE self)
   rb_control_frame_t *cfp;
 
   cfp = TH_CFP(thread);
-  //cfp++;
+  cfp++;
 
-  fprintf(stderr, "cfp path %s\n", StringValueCStr(cfp->iseq->body->location.path));
+  if(cfp == NULL || cfp->iseq == NULL || cfp->iseq->body == NULL) {
+    fprintf(stderr, "shit\n");
+  }
+
+  char* file = RSTRING_PTR(StringValue(cfp->iseq->body->location.path));
+  fprintf(stderr, "path %s\n", file);
 
   int i = 0;
 
