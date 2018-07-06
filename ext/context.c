@@ -5,16 +5,6 @@ static int thnum_current = 0;
 
 static VALUE idAlive;
 
-#if RUBY_API_VERSION_CODE >= 20500
-  #if (RUBY_RELEASE_YEAR == 2017 && RUBY_RELEASE_MONTH == 10 && RUBY_RELEASE_DAY == 10) //workaround for 2.5.0-preview1
-    #define TH_CFP(thread) ((rb_control_frame_t *)(thread)->ec.cfp)
-  #else
-    #define TH_CFP(thread) ((rb_control_frame_t *)(thread)->ec->cfp)
-  #endif
-#else
-  #define TH_CFP(thread) ((rb_control_frame_t *)(thread)->cfp)
-#endif
-
 #define ruby_current_thread ((rb_thread_t *)RTYPEDDATA_DATA(rb_thread_current()))
 
 /* "Step", "Next" and "Finish" do their work by saving information
@@ -135,6 +125,7 @@ Context_mark(debug_context_t *context)
 {
   debug_frame_t *frame;
 
+  rb_gc_mark(context->step_in_variants);
   rb_gc_mark(context->thread);
   frame = context->stack;
   while(frame != NULL)
@@ -158,7 +149,7 @@ static void debug_class_print(VALUE v) {
 }
 
 extern VALUE
-context_create(VALUE thread, rb_thread_t *c_thread, VALUE cDebugThread) {
+context_create(VALUE thread, VALUE cDebugThread) {
   debug_context_t *context;
   VALUE locations;
 
@@ -170,7 +161,6 @@ context_create(VALUE thread, rb_thread_t *c_thread, VALUE cDebugThread) {
   context->stack = NULL;
   context->thnum = ++thnum_current;
   context->thread = thread;
-  context->c_thread = c_thread;
   context->flags = 0;
   context->last_file = NULL;
   context->last_line = -1;
@@ -320,49 +310,6 @@ Context_stop_next(int argc, VALUE *argv, VALUE self)
 
   Data_Get_Struct(self, debug_context_t, context);
 
-  rb_thread_t *thread = context->c_thread;
-
-  if(thread == NULL) {
-    fprintf(stderr, "#shiiiit0\n");
-  }
-
-  rb_control_frame_t *cfp;
-
-  cfp = TH_CFP(thread);
-  cfp++;
-
-  if(cfp == NULL || cfp->iseq == NULL || cfp->iseq->body == NULL) {
-    fprintf(stderr, "shit\n");
-  }
-
-  char* file = RSTRING_PTR(StringValue(cfp->iseq->body->location.path));
-  fprintf(stderr, "path %s\n", file);
-
-  int i = 0;
-
-  fprintf(stderr, "#0\n");
-  if(cfp->iseq == NULL) {
-    fprintf(stderr, "#shiiiit\n");
-  }
-
-  struct rb_iseq_constant_body *const body = cfp->iseq->body;
-  fprintf(stderr, "#1\n");
-  if(cfp->iseq->body == NULL) {
-    fprintf(stderr, "#shiiiit2\n");
-  }
-  struct rb_call_info *ci_entries = &body->ci_entries[body->ci_size];
-
-  if(ci_entries == NULL) {
-    fprintf(stderr, "#shiiiit3\n");
-  }
-
-  fprintf(stderr, "body->ci_size: %d\n", body->ci_size);
-  for(; i < body->ci_size; i++) {
-
-    VALUE mid = rb_id2str(ci_entries[i].mid);
-    fprintf(stderr, "%d %s\n", i,  StringValueCStr(mid));
-  }
-
   context->stop_next = FIX2INT(steps);
 
 
@@ -455,6 +402,7 @@ Init_context(VALUE mDebase)
   rb_define_method(cContext, "step_over", Context_step_over, -1);
   rb_define_method(cContext, "stop_frame=", Context_stop_frame, 1);
   rb_define_method(cContext, "pause", Context_pause, 0);
+  rb_define_method(cContext, "step_in_variants", Context_pause, 0);
 
   idAlive = rb_intern("alive?");
   context_init_variables();

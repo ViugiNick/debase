@@ -53,7 +53,7 @@ typedef struct debug_context {
   int stack_size;
 
   VALUE thread;
-  rb_thread_t *c_thread;
+  VALUE step_in_variants;
   int thnum;
   int flags;
   
@@ -84,7 +84,7 @@ typedef struct
 
 /* functions */
 extern VALUE Init_context(VALUE mDebase);
-extern VALUE context_create(VALUE thread, rb_thread_t* c_thread, VALUE cDebugThread);
+extern VALUE context_create(VALUE thread, VALUE cDebugThread);
 extern void reset_stepping_stop_points(debug_context_t *context);
 extern VALUE Context_ignored(VALUE self);
 extern void fill_stack(debug_context_t *context, const rb_debug_inspector_t *inspector);

@@ -22,6 +22,16 @@ static VALUE cDebugThread;
 static VALUE contexts;
 static VALUE breakpoints;
 
+#if RUBY_API_VERSION_CODE >= 20500
+  #if (RUBY_RELEASE_YEAR == 2017 && RUBY_RELEASE_MONTH == 10 && RUBY_RELEASE_DAY == 10) //workaround for 2.5.0-preview1
+    #define TH_CFP(thread) ((rb_control_frame_t *)(thread)->ec.cfp)
+  #else
+    #define TH_CFP(thread) ((rb_control_frame_t *)(thread)->ec->cfp)
+  #endif
+#else
+  #define TH_CFP(thread) ((rb_control_frame_t *)(thread)->cfp)
+#endif
+
 static int started = 0;
 
 static const rb_iseq_t *
@@ -94,12 +104,12 @@ static void debug_class_print(VALUE v) {
 }
 
 static VALUE
-Debase_thread_context(VALUE self, VALUE thread, rb_thread_t *c_thread)
+Debase_thread_context(VALUE self, VALUE thread)
 {
   VALUE context;
   context = rb_hash_aref(contexts, thread);
   if (context == Qnil) {
-    context = context_create(thread, c_thread, cDebugThread);
+    context = context_create(thread, cDebugThread);
     debug_class_print(context);
     rb_hash_aset(contexts, thread, context);
   }
@@ -109,7 +119,7 @@ Debase_thread_context(VALUE self, VALUE thread, rb_thread_t *c_thread)
 static VALUE
 Debase_current_context(VALUE self)
 {
-  return Debase_thread_context(self, rb_thread_current(), rb_thread_current());
+  return Debase_thread_context(self, rb_thread_current());
 }
 
 static breakpoint_t* find_breakpoint_by_pos(char* path, int line) {
@@ -190,6 +200,127 @@ my_rb_vm_get_binding_creatable_next_cfp(const rb_thread_t *th, const rb_control_
     return 0;
 }
 
+static VALUE
+get_step_in_variants(rb_control_frame_t* cfp) {
+    char type;
+    int n;
+
+    fprintf(stderr, "#4\n");
+
+    VALUE ans = rb_ary_new();
+
+    fprintf(stderr, "#3\n");
+
+    if(cfp == NULL) {
+        fprintf(stderr, "#0\n");
+    }
+
+    if(cfp->iseq != NULL)
+    {
+        if(cfp->pc == NULL || cfp->iseq->body == NULL)
+        {
+            fprintf(stderr, "#4\n");
+            return Qnil;
+        }
+        else
+        {
+            fprintf(stderr, "#5\n");
+            const rb_iseq_t *iseq = cfp->iseq;
+            VALUE* code = rb_iseq_original_iseq(iseq);
+
+            char* file = RSTRING_PTR(StringValue(iseq->body->location.path));
+
+            ptrdiff_t pc = cfp->pc - cfp->iseq->body->iseq_encoded;
+            unsigned int size = cfp->iseq->body->iseq_size;
+
+            fprintf(stderr, "#6\n");
+
+            for (n = pc; n < size;) {
+                fprintf(stderr, "#7\n");
+                VALUE insn = code[n];
+                char * instruction_name = insn_name(insn);
+
+                const char *types = insn_op_types(insn);
+
+                for (int j = 0; type = types[j]; j++) {
+                    switch(type) {
+                        case TS_OFFSET:
+                            fprintf(stderr, "%d TS_OFFSET\n", j);
+                            break;
+
+                        case TS_NUM:
+                            fprintf(stderr, "%d TS_NUM\n", j);
+                            break;
+
+                        case  TS_LINDEX:
+                            fprintf(stderr, "%d TS_LINDEX\n", j);
+                            break;
+
+                        case  TS_ID:
+                            fprintf(stderr, "%d TS_ID\n", j);
+                            break;
+
+                        case  TS_VALUE:
+                            fprintf(stderr, "%d TS_VALUE\n", j);
+                            break;
+
+                        case  TS_ISEQ:
+                            fprintf(stderr, "%d TS_ISEQ\n", j);
+                            break;
+
+
+                        case  TS_GENTRY:
+                            fprintf(stderr, "%d TS_GENTRY\n", j);
+                            break;
+
+
+                        case  TS_IC:
+                            fprintf(stderr, "%d TS_IC\n", j);
+                            break;
+
+                        case  TS_CALLINFO:
+                            fprintf(stderr, "%d TS_CALLINFO\n", j);
+                            break;
+
+                        case  TS_CALLCACHE:
+                            fprintf(stderr, "%d TS_CALLCACHE\n", j);
+                            break;
+
+                        case  TS_FUNCPTR:
+                            fprintf(stderr, "%d TS_FUNCPTR\n", j);
+                            break;
+                    }
+
+                    VALUE op = code[n + j + 1];
+
+                    if(type == 0) {
+                        return ans;
+                    }
+
+                    if(type == TS_CALLINFO) {
+                        struct rb_call_info *ci = (struct rb_call_info *)op;
+
+                        if (ci->mid) {
+                            if(strcmp(instruction_name, "send") == 0) {
+                                fprintf(stderr, "send\n");
+                                rb_ary_push(ans, rb_id2str(ci->mid));
+                                rb_ary_push(ans, rb_sprintf("block for %"PRIsVALUE, rb_id2str(ci->mid)));
+                            }
+                            if(strcmp(instruction_name, "opt_send_without_block") == 0) {
+                                fprintf(stderr, "opt_send_without_block\n");
+                                rb_ary_push(ans, rb_id2str(ci->mid));
+                            }
+                        }
+                    }
+                }
+
+                n += insn_len(insn);
+            }
+        }
+    }
+    return ans;
+}
+
 static void
 process_line_event(VALUE trace_point, void *data)
 {
@@ -223,60 +354,10 @@ process_line_event(VALUE trace_point, void *data)
     thread = ruby_current_thread;
     cfp = TH_CFP(thread);
 
-    fprintf(stderr, "#1\n");
-
-    //cfp += 1;
     cfp = my_rb_vm_get_binding_creatable_next_cfp(thread, cfp);
 
-    if(cfp->iseq != NULL)
-    {
-        if(cfp->pc == NULL || cfp->iseq->body == NULL)
-        {
-            fprintf(stderr, "shit\n");
-        }
-        else
-        {
-            const rb_iseq_t *iseq = cfp->iseq;
-            VALUE* code = rb_iseq_original_iseq(iseq);
-
-            char* file = RSTRING_PTR(StringValue(iseq->body->location.path));
-            //fprintf(stderr, "iseq file %s\n", file);
-
-            ptrdiff_t pc = cfp->pc - cfp->iseq->body->iseq_encoded;
-            unsigned int size = cfp->iseq->body->iseq_size;
-            //fprintf(stderr, "iseq file %s\n", file);
-            //fprintf(stderr, "iseq size %d\n", size);
-            const VALUE *iseq_original = rb_iseq_original_iseq((rb_iseq_t *)iseq);
-
-            for (n = pc; n < size;) {
-            	VALUE insn = iseq_original[n];
-                const char *types = insn_op_types(insn);
-
-                for (int j = 0; type = types[j]; j++) {
-                    VALUE op = code[n + j + 1];
-
-                    if(type == 0) {
-                        n = size;
-                        break;
-                    }
-
-                    if(type == TS_CALLINFO) {
-                        struct rb_call_info *ci = (struct rb_call_info *)op;
-
-                        if (ci->mid) {
-                            fprintf(stderr, "command %s\n", insn_name(insn));
-
-                            debug_print(rb_sprintf("mid:%"PRIsVALUE, rb_id2str(ci->mid)));
-                        }
-                    }
-                }
-
-            	n += insn_len(insn);
-            }
-        }
-    }
-
     context->stop_reason = CTX_STOP_BREAKPOINT;
+    context->step_in_variants = get_step_in_variants(cfp);
 
     rb_ensure(start_inspector, context_object, stop_inspector, Qnil);
     rb_funcall(context_object, idAtBreakpoint, 1, INT2NUM(breakpoint->id));
