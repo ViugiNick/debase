@@ -243,53 +243,53 @@ get_step_in_variants(rb_control_frame_t* cfp) {
                 const char *types = insn_op_types(insn);
 
                 for (int j = 0; type = types[j]; j++) {
-                    switch(type) {
-                        case TS_OFFSET:
-                            fprintf(stderr, "%d TS_OFFSET\n", j);
-                            break;
-
-                        case TS_NUM:
-                            fprintf(stderr, "%d TS_NUM\n", j);
-                            break;
-
-                        case  TS_LINDEX:
-                            fprintf(stderr, "%d TS_LINDEX\n", j);
-                            break;
-
-                        case  TS_ID:
-                            fprintf(stderr, "%d TS_ID\n", j);
-                            break;
-
-                        case  TS_VALUE:
-                            fprintf(stderr, "%d TS_VALUE\n", j);
-                            break;
-
-                        case  TS_ISEQ:
-                            fprintf(stderr, "%d TS_ISEQ\n", j);
-                            break;
-
-
-                        case  TS_GENTRY:
-                            fprintf(stderr, "%d TS_GENTRY\n", j);
-                            break;
-
-
-                        case  TS_IC:
-                            fprintf(stderr, "%d TS_IC\n", j);
-                            break;
-
-                        case  TS_CALLINFO:
-                            fprintf(stderr, "%d TS_CALLINFO\n", j);
-                            break;
-
-                        case  TS_CALLCACHE:
-                            fprintf(stderr, "%d TS_CALLCACHE\n", j);
-                            break;
-
-                        case  TS_FUNCPTR:
-                            fprintf(stderr, "%d TS_FUNCPTR\n", j);
-                            break;
-                    }
+//                    switch(type) {
+//                        case TS_OFFSET:
+//                            fprintf(stderr, "%d TS_OFFSET\n", j);
+//                            break;
+//
+//                        case TS_NUM:
+//                            fprintf(stderr, "%d TS_NUM\n", j);
+//                            break;
+//
+//                        case  TS_LINDEX:
+//                            fprintf(stderr, "%d TS_LINDEX\n", j);
+//                            break;
+//
+//                        case  TS_ID:
+//                            fprintf(stderr, "%d TS_ID\n", j);
+//                            break;
+//
+//                        case  TS_VALUE:
+//                            fprintf(stderr, "%d TS_VALUE\n", j);
+//                            break;
+//
+//                        case  TS_ISEQ:
+//                            fprintf(stderr, "%d TS_ISEQ\n", j);
+//                            break;
+//
+//
+//                        case  TS_GENTRY:
+//                            fprintf(stderr, "%d TS_GENTRY\n", j);
+//                            break;
+//
+//
+//                        case  TS_IC:
+//                            fprintf(stderr, "%d TS_IC\n", j);
+//                            break;
+//
+//                        case  TS_CALLINFO:
+//                            fprintf(stderr, "%d TS_CALLINFO\n", j);
+//                            break;
+//
+//                        case  TS_CALLCACHE:
+//                            fprintf(stderr, "%d TS_CALLCACHE\n", j);
+//                            break;
+//
+//                        case  TS_FUNCPTR:
+//                            fprintf(stderr, "%d TS_FUNCPTR\n", j);
+//                            break;
+//                    }
 
                     VALUE op = code[n + j + 1];
 
@@ -310,6 +310,14 @@ get_step_in_variants(rb_control_frame_t* cfp) {
                                 fprintf(stderr, "opt_send_without_block\n");
                                 rb_ary_push(ans, rb_id2str(ci->mid));
                             }
+                        }
+                    }
+
+                    if(type == TS_ISEQ) {
+                        const rb_iseq_t *iseq = rb_iseq_check((rb_iseq_t *)op);
+
+                        if(iseq) {
+                            fprintf(stderr, "block iseq found\n");
                         }
                     }
                 }
