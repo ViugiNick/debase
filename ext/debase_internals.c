@@ -314,11 +314,7 @@ get_step_in_variants(rb_control_frame_t* cfp) {
                     }
 
                     if(type == TS_ISEQ) {
-                        const rb_iseq_t *iseq = rb_iseq_check((rb_iseq_t *)op);
-
-                        if(iseq) {
-                            fprintf(stderr, "block iseq found\n");
-                        }
+                        my_rb_iseqw_line_trace_specify(op, 0, Qtrue);
                     }
                 }
 
@@ -390,6 +386,39 @@ Debase_setup_tracepoints(VALUE self)
   rb_tracepoint_enable(tpLine);
 
   return Qnil;
+}
+
+static void
+c_block_add_breakpoint(rb_iseq_t *iseq)
+{
+    int i;
+    VALUE *code;
+    VALUE child = rb_ary_tmp_new(3);
+    unsigned int size;
+    size_t n;
+    VALUE str = rb_str_new(0, 0);
+
+    size = iseq->body->line_info_size;
+    const struct iseq_line_info_entry *table = iseq->body->line_info_table;
+
+    int left = 0;
+    int right = size;
+
+    int cnt = 0;
+
+    my_rb_iseqw_line_trace_specify(rb_iseqw_new(iseq), lineno, Qtrue);
+
+    size = iseq->body->iseq_size;
+    code = rb_iseq_original_iseq(iseq);
+    for (n = 0; n < size;) {
+        n += rb_iseq_disasm_insn(str, code, n, iseq, child);
+    }
+
+    for (i = 0; i < RARRAY_LEN(child); i++) {
+        VALUE isv = rb_ary_entry(child, i);
+        rb_iseq_t *tmp_iseq = rb_iseq_check((rb_iseq_t *)isv);
+        c_add_breakpoint(lineno, tmp_iseq);
+    }
 }
 
 static void
