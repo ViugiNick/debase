@@ -11,10 +11,14 @@ static VALUE mDebase;                 /* Ruby Debase Module object */
 static VALUE cContext;
 
 static int breakpoint_max = 0;
+
 static breakpoint_list_node_t* breakpoint_list = NULL;
+static breakpoint_list_node_t* checkpoint_list = NULL;
+
 
 static VALUE idAlive;
 static VALUE tpLine;
+static VALUE tpCall;
 static VALUE idAtLine;
 static VALUE idAtBreakpoint;
 static VALUE idMpLoadIseq;
@@ -75,6 +79,23 @@ my_line_trace_specify(int line, rb_event_flag_t *events_ptr, void *ptr)
     }
 }
 
+static int
+my_first_line_trace_specify(int line, rb_event_flag_t *events_ptr, void *ptr)
+{
+    fprintf(stderr, "my_first_line_trace_specify %d\n", line);
+
+    struct set_specifc_data *data = (struct set_specifc_data *)ptr;
+
+    data->prev = *events_ptr & RUBY_EVENT_SPECIFIED_LINE ? 1 : 2;
+    if (data->set) {
+        *events_ptr = *events_ptr | RUBY_EVENT_SPECIFIED_LINE;
+    }
+    else {
+        *events_ptr = *events_ptr & ~RUBY_EVENT_SPECIFIED_LINE;
+    }
+    return 0;
+}
+
 VALUE
 my_rb_iseqw_line_trace_specify(VALUE iseqval, int needed_line, VALUE set)
 {
@@ -92,6 +113,25 @@ my_rb_iseqw_line_trace_specify(VALUE iseqval, int needed_line, VALUE set)
     }
 
     rb_iseqw_line_trace_each(iseqval, my_line_trace_specify, (void *)&data);
+
+    return data.prev == 1 ? Qtrue : Qfalse;
+}
+
+VALUE
+my_rb_iseqw_first_line_trace_specify(VALUE iseqval, VALUE set)
+{
+    struct set_specifc_data data;
+
+    data.prev = 0;
+
+    switch (set) {
+      case Qtrue:  data.set = 1; break;
+      case Qfalse: data.set = 0; break;
+      default:
+	    rb_raise(rb_eTypeError, "`set' should be true/false");
+    }
+
+    rb_iseqw_line_trace_each(iseqval, my_first_line_trace_specify, (void *)&data);
 
     return data.prev == 1 ? Qtrue : Qfalse;
 }
@@ -127,6 +167,20 @@ static breakpoint_t* find_breakpoint_by_pos(char* path, int line) {
 
     while(breakpoint != NULL) {
         //fprintf(stderr, "find_breakpoint2 %s:%s\n", breakpoint->breakpoint->source, path);
+        if(strcmp (breakpoint->breakpoint->source, path) == 0 && breakpoint->breakpoint->line == line) {
+            return breakpoint->breakpoint;
+        }
+        breakpoint = breakpoint->next;
+    }
+
+    return NULL;
+}
+
+static breakpoint_t* find_checkpoint_by_pos(char* path, int line) {
+    breakpoint_list_node_t* breakpoint = checkpoint_list;
+
+    while(breakpoint != NULL) {
+        fprintf(stderr, "find_breakpoint2 %s:%s\n", breakpoint->breakpoint->source, path);
         if(strcmp (breakpoint->breakpoint->source, path) == 0 && breakpoint->breakpoint->line == line) {
             return breakpoint->breakpoint;
         }
@@ -200,16 +254,13 @@ my_rb_vm_get_binding_creatable_next_cfp(const rb_thread_t *th, const rb_control_
     return 0;
 }
 
-static VALUE
-get_step_in_variants(rb_control_frame_t* cfp) {
+static step_in_info_t*
+get_step_in_info(rb_control_frame_t* cfp) {
     char type;
     int n;
 
-    fprintf(stderr, "#4\n");
-
-    VALUE ans = rb_ary_new();
-
-    fprintf(stderr, "#3\n");
+    step_in_info_t* ans = ALLOC(step_in_info_t);
+    ans->size = 0;
 
     if(cfp == NULL) {
         fprintf(stderr, "#0\n");
@@ -243,54 +294,45 @@ get_step_in_variants(rb_control_frame_t* cfp) {
                 const char *types = insn_op_types(insn);
 
                 for (int j = 0; type = types[j]; j++) {
-//                    switch(type) {
-//                        case TS_OFFSET:
-//                            fprintf(stderr, "%d TS_OFFSET\n", j);
-//                            break;
-//
-//                        case TS_NUM:
-//                            fprintf(stderr, "%d TS_NUM\n", j);
-//                            break;
-//
-//                        case  TS_LINDEX:
-//                            fprintf(stderr, "%d TS_LINDEX\n", j);
-//                            break;
-//
-//                        case  TS_ID:
-//                            fprintf(stderr, "%d TS_ID\n", j);
-//                            break;
-//
-//                        case  TS_VALUE:
-//                            fprintf(stderr, "%d TS_VALUE\n", j);
-//                            break;
-//
-//                        case  TS_ISEQ:
-//                            fprintf(stderr, "%d TS_ISEQ\n", j);
-//                            break;
-//
-//
-//                        case  TS_GENTRY:
-//                            fprintf(stderr, "%d TS_GENTRY\n", j);
-//                            break;
-//
-//
-//                        case  TS_IC:
-//                            fprintf(stderr, "%d TS_IC\n", j);
-//                            break;
-//
-//                        case  TS_CALLINFO:
-//                            fprintf(stderr, "%d TS_CALLINFO\n", j);
-//                            break;
-//
-//                        case  TS_CALLCACHE:
-//                            fprintf(stderr, "%d TS_CALLCACHE\n", j);
-//                            break;
-//
-//                        case  TS_FUNCPTR:
-//                            fprintf(stderr, "%d TS_FUNCPTR\n", j);
-//                            break;
-//                    }
+                    VALUE op = code[n + j + 1];
 
+                    if(type == 0) {
+                        break;
+                    }
+
+                    if(type == TS_CALLINFO) {
+                        struct rb_call_info *ci = (struct rb_call_info *)op;
+
+                        if (ci->mid) {
+                            if(strcmp(instruction_name, "send") == 0) {
+                                ans->size++;
+                                //rb_ary_push(ans, rb_id2str(ci->mid));
+                                //rb_ary_push(ans, rb_sprintf("block for %"PRIsVALUE, rb_id2str(ci->mid)));
+                            }
+                            if(strcmp(instruction_name, "opt_send_without_block") == 0) {
+                                ans->size++;
+                                //fprintf(stderr, "opt_send_without_block\n");
+                                //rb_ary_push(ans, rb_id2str(ci->mid));
+                            }
+                        }
+                    }
+
+                }
+
+                n += insn_len(insn);
+            }
+
+            step_in_variant_t** variants = (step_in_variant_t*)malloc(ans->size + 1);
+            int i = 0;
+
+            for (int insn_iter = 0, n = pc; n < size; insn_iter++) {
+                fprintf(stderr, "#7\n");
+                VALUE insn = code[n];
+                char * instruction_name = insn_name(insn);
+
+                const char *types = insn_op_types(insn);
+
+                for (int j = 0; type = types[j]; j++) {
                     VALUE op = code[n + j + 1];
 
                     if(type == 0) {
@@ -302,13 +344,22 @@ get_step_in_variants(rb_control_frame_t* cfp) {
 
                         if (ci->mid) {
                             if(strcmp(instruction_name, "send") == 0) {
-                                fprintf(stderr, "send\n");
-                                rb_ary_push(ans, rb_id2str(ci->mid));
-                                rb_ary_push(ans, rb_sprintf("block for %"PRIsVALUE, rb_id2str(ci->mid)));
+                                step_in_variant_t* variant = ALLOC(step_in_variant_t);
+                                variant->mid = rb_id2str(ci->mid);
+                                variant->pc_offset = insn_iter;
+                                variant->pc = n + insn_len(insn);
+                                variants[i] = variant;
+                                i++;
+//                                step_in_variants_number += 2;
+//                                rb_ary_push(ans, rb_id2str(ci->mid));
+//                                rb_ary_push(ans, rb_sprintf("block for %"PRIsVALUE, rb_id2str(ci->mid)));
                             }
                             if(strcmp(instruction_name, "opt_send_without_block") == 0) {
-                                fprintf(stderr, "opt_send_without_block\n");
-                                rb_ary_push(ans, rb_id2str(ci->mid));
+                                step_in_variant_t* variant = ALLOC(step_in_variant_t);
+                                variant->mid = rb_id2str(ci->mid);
+                                variant->pc_offset = insn_iter;
+                                variants[i] = variant;
+                                i++;
                             }
                         }
                     }
@@ -320,9 +371,46 @@ get_step_in_variants(rb_control_frame_t* cfp) {
 
                 n += insn_len(insn);
             }
+            ans->variants = variants;
         }
     }
     return ans;
+}
+
+static void
+c_add_breakpoint_first_line(rb_iseq_t *iseq)
+{
+    my_rb_iseqw_first_line_trace_specify(rb_iseqw_new(iseq), Qtrue);
+}
+
+static void
+process_call_event(VALUE trace_point, void *data)
+{
+    VALUE context_object;
+    breakpoint_t* breakpoint;
+    debug_context_t *context;
+    rb_trace_point_t *tp;
+    char *file;
+    int line;
+    int n;
+    char type;
+
+    context_object = Debase_current_context(mDebase);
+    Data_Get_Struct(context_object, debug_context_t, context);
+
+    rb_thread_t *thread;
+    rb_control_frame_t *cfp;
+    thread = ruby_current_thread;
+    cfp = TH_CFP(thread);
+    rb_control_frame_t *prev_cfp = cfp + 1;
+
+    int pc = prev_cfp->pc - prev_cfp->iseq->body->iseq_encoded;
+    fprintf(stderr, "cfp->pc %d == context->stop_pc %d\n", pc, context->stop_pc);
+    fprintf(stderr, "context->cfp %d == cfp %d\n", (void*)context->cfp, (void*)cfp);
+    if(pc == context->stop_pc) {
+        c_add_breakpoint_first_line(cfp->iseq);
+        Debase_call_tracepoint_disable();
+    }
 }
 
 static void
@@ -346,9 +434,7 @@ process_line_event(VALUE trace_point, void *data)
     line = FIX2INT(lineno);
 
     breakpoint = find_breakpoint_by_pos(file, line);
-    if(breakpoint == NULL) {
-        return;
-    }
+    fprintf(stderr, "call_at_line(context, %s, %d, context_object);\n", file, line);
 
     context_object = Debase_current_context(mDebase);
     Data_Get_Struct(context_object, debug_context_t, context);
@@ -361,10 +447,15 @@ process_line_event(VALUE trace_point, void *data)
     cfp = my_rb_vm_get_binding_creatable_next_cfp(thread, cfp);
 
     context->stop_reason = CTX_STOP_BREAKPOINT;
-    context->step_in_variants = get_step_in_variants(cfp);
+    context->step_in_info = get_step_in_info(cfp);
+
+    fprintf(stderr, "debase_internals %d\n", (void*)ruby_current_thread);
 
     rb_ensure(start_inspector, context_object, stop_inspector, Qnil);
-    rb_funcall(context_object, idAtBreakpoint, 1, INT2NUM(breakpoint->id));
+    if(breakpoint != NULL) {
+        rb_funcall(context_object, idAtBreakpoint, 1, INT2NUM(breakpoint->id));
+    }
+
     reset_stepping_stop_points(context);
     call_at_line(context, file, line, context_object);
 }
@@ -384,6 +475,25 @@ Debase_setup_tracepoints(VALUE self)
   rb_global_variable(&tpLine);
 
   rb_tracepoint_enable(tpLine);
+
+  return Qnil;
+}
+
+VALUE
+Debase_call_tracepoint_enable()
+{
+  tpCall = rb_tracepoint_new(Qnil, RUBY_EVENT_CALL, process_call_event, NULL);
+  rb_global_variable(&tpCall);
+
+  rb_tracepoint_enable(tpCall);
+
+  return Qnil;
+}
+
+VALUE
+Debase_call_tracepoint_disable()
+{
+  rb_tracepoint_disable(tpCall);
 
   return Qnil;
 }
@@ -506,6 +616,27 @@ static void walk_throw_threads(char* source, int line)
             }
         }
 }
+
+//static VALUE
+//Debase_add_catchpoint(VALUE self, VALUE source, VALUE line)
+//{
+//    breakpoint_t *breakpoint;
+//    breakpoint_list_node_t *breakpoint_node;
+//
+//    breakpoint = ALLOC(breakpoint_t);
+//
+//    breakpoint->source = RSTRING_PTR(StringValue(source));
+//    breakpoint->line = FIX2INT(line);
+//
+//    breakpoint_node = ALLOC(breakpoint_list_node_t);
+//    breakpoint_node->breakpoint = breakpoint;
+//    breakpoint_node->next = checkpoint_list;
+//    checkpoint_list = breakpoint_node;
+//
+//    walk_throw_threads(breakpoint->source, breakpoint->line);
+//
+//    return INT2NUM(breakpoint->id);
+//}
 
 static VALUE
 Debase_add_breakpoint(VALUE self, VALUE source, VALUE line, VALUE expr)
@@ -634,6 +765,7 @@ Init_debase_internals()
     mDebase = rb_define_module("Debase");
 
     rb_define_module_function(mDebase, "setup_tracepoints", Debase_setup_tracepoints, 0);
+
     rb_define_module_function(mDebase, "current_context", Debase_current_context, 0);
     rb_define_module_function(mDebase, "do_add_breakpoint", Debase_add_breakpoint, 3);
     rb_define_module_function(mDebase, "debug_load", Debase_debug_load, -1);

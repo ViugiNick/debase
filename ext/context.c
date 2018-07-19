@@ -5,7 +5,19 @@ static int thnum_current = 0;
 
 static VALUE idAlive;
 
+#define MAX_POSBUF 128
+#define RUBY_VM_IFUNC_P(ptr)        (RB_TYPE_P((VALUE)(ptr), T_IMEMO) && imemo_type((VALUE)ptr) == imemo_ifunc)
 #define ruby_current_thread ((rb_thread_t *)RTYPEDDATA_DATA(rb_thread_current()))
+
+#if RUBY_API_VERSION_CODE >= 20500
+  #if (RUBY_RELEASE_YEAR == 2017 && RUBY_RELEASE_MONTH == 10 && RUBY_RELEASE_DAY == 10) //workaround for 2.5.0-preview1
+    #define TH_CFP(thread) ((rb_control_frame_t *)(thread)->ec.cfp)
+  #else
+    #define TH_CFP(thread) ((rb_control_frame_t *)(thread)->ec->cfp)
+  #endif
+#else
+  #define TH_CFP(thread) ((rb_control_frame_t *)(thread)->cfp)
+#endif
 
 /* "Step", "Next" and "Finish" do their work by saving information
    about where to stop next. reset_stopping_points removes/resets this
@@ -125,7 +137,6 @@ Context_mark(debug_context_t *context)
 {
   debug_frame_t *frame;
 
-  rb_gc_mark(context->step_in_variants);
   rb_gc_mark(context->thread);
   frame = context->stack;
   while(frame != NULL)
@@ -311,14 +322,10 @@ Context_stop_next(int argc, VALUE *argv, VALUE self)
   Data_Get_Struct(self, debug_context_t, context);
 
   context->stop_next = FIX2INT(steps);
+  context->cfp = TH_CFP(ruby_current_thread);
+  context->stop_pc = context->step_in_info->variants[0]->pc;
 
-
-  if(RTEST(force))
-      CTX_FL_SET(context, CTX_FL_FORCE_MOVE);
-  else
-      CTX_FL_UNSET(context, CTX_FL_FORCE_MOVE);
-
-  return steps;
+  Debase_call_tracepoint_enable();
 }
 
 static VALUE

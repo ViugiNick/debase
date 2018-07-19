@@ -8,6 +8,7 @@
 #include <iseq.h>
 #include <vm_insnhelper.h>
 #include <method.h>
+#include <internal.h>
 
 #include "insns.inc"
 #include "insns_info.inc"
@@ -48,12 +49,28 @@ typedef struct debug_frame_t
     VALUE self;
 } debug_frame_t;
 
+typedef struct step_in_variant_t
+{
+    VALUE mid;
+    rb_iseq_t *block_iseq;
+    int pc_offset;
+    int pc;
+} step_in_variant_t;
+
+typedef struct step_in_info_t
+{
+    step_in_variant_t **variants;
+    int size;
+} step_in_info_t;
+
 typedef struct debug_context {
   debug_frame_t *stack;
   int stack_size;
 
   VALUE thread;
-  VALUE step_in_variants;
+  rb_control_frame_t *cfp;
+  int stop_pc;
+  step_in_info_t* step_in_info;
   int thnum;
   int flags;
   
@@ -85,6 +102,8 @@ typedef struct
 /* functions */
 extern VALUE Init_context(VALUE mDebase);
 extern VALUE context_create(VALUE thread, VALUE cDebugThread);
+extern VALUE Debase_call_tracepoint_enable();
+extern VALUE Debase_call_tracepoint_disable();
 extern void reset_stepping_stop_points(debug_context_t *context);
 extern VALUE Context_ignored(VALUE self);
 extern void fill_stack(debug_context_t *context, const rb_debug_inspector_t *inspector);
