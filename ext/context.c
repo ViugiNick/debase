@@ -30,6 +30,11 @@ reset_stepping_stop_points(debug_context_t *context)
   context->stop_next  = -1;
 }
 
+static void debug_print(VALUE v) {
+    ID sym_puts = rb_intern("puts");
+    rb_funcall(rb_mKernel, sym_puts, 1, v);
+}
+
 static inline VALUE
 Context_thnum(VALUE self) {
   debug_context_t *context;
@@ -104,6 +109,27 @@ Context_stack_size(VALUE self)
   debug_context_t *context;
   Data_Get_Struct(self, debug_context_t, context);
   return INT2FIX(context->stack_size);
+}
+
+static inline VALUE
+Context_step_in_variants(VALUE self)
+{
+  VALUE ary;
+  int i;
+
+  debug_context_t *context;
+  Data_Get_Struct(self, debug_context_t, context);
+
+  step_in_info_t* step_in_info = context->step_in_info;
+
+  ary = rb_ary_new();
+
+  for(i = 0; i < step_in_info->size; i++) {
+    step_in_variant_t* variant = step_in_info->variants[i];
+    rb_ary_push(ary, variant->mid);
+  }
+
+  return ary;
 }
 
 static inline VALUE
@@ -311,7 +337,6 @@ Context_pause(VALUE self)
 static VALUE
 Context_stop_next(int argc, VALUE *argv, VALUE self)
 {
-  fprintf(stderr, "Context_stop_next\n");
   VALUE steps;
   VALUE force;
   debug_context_t *context;
@@ -329,6 +354,28 @@ Context_stop_next(int argc, VALUE *argv, VALUE self)
 }
 
 static VALUE
+Context_smart_step(VALUE self, VALUE rb_variant_id, VALUE force)
+{
+  int variant_id;
+  variant_id = FIX2INT(rb_variant_id);
+
+  debug_context_t *context;
+
+  Data_Get_Struct(self, debug_context_t, context);
+
+  step_in_variant_t* variant = context->step_in_info->variants[variant_id];
+
+  if(variant->block_iseq != NULL) {
+    c_add_breakpoint_first_line(variant->block_iseq);
+    return;
+  }
+
+  context->cfp = TH_CFP(ruby_current_thread);
+  context->stop_pc = variant->pc;
+  Debase_call_tracepoint_enable();
+}
+
+static VALUE
 Context_step_over(int argc, VALUE *argv, VALUE self)
 {
   VALUE lines, frame, force;
@@ -340,24 +387,13 @@ Context_step_over(int argc, VALUE *argv, VALUE self)
     rb_raise(rb_eRuntimeError, "No frames collected.");
 
   rb_scan_args(argc, argv, "12", &lines, &frame, &force);
-  context->stop_line = FIX2INT(lines);
-  CTX_FL_UNSET(context, CTX_FL_STEPPED);
-  if (frame == Qnil)
-  {
-    context->dest_frame = context->calced_stack_size;
-  }
-  else
-  {
-    if (FIX2INT(frame) < 0 && FIX2INT(frame) >= context->calced_stack_size)
-      rb_raise(rb_eRuntimeError, "Destination frame is out of range.");
-    context->dest_frame = context->calced_stack_size - FIX2INT(frame);
-  }
-  if(RTEST(force))
-    CTX_FL_SET(context, CTX_FL_FORCE_MOVE);
-  else
-    CTX_FL_UNSET(context, CTX_FL_FORCE_MOVE);
 
-  return Qnil;
+  rb_control_frame_t *cfp = TH_CFP(ruby_current_thread);
+
+  cfp += 10;
+
+  debug_print(cfp->iseq->body->location.path);
+  debug_print(cfp->iseq->body->location.first_lineno);
 }
 
 static VALUE
@@ -395,6 +431,7 @@ Init_context(VALUE mDebase)
 {
   cContext = rb_define_class_under(mDebase, "Context", rb_cObject);
   rb_define_method(cContext, "stack_size", Context_stack_size, 0);
+  rb_define_method(cContext, "step_variants", Context_step_in_variants, 0);
   rb_define_method(cContext, "thread", Context_thread, 0);
   rb_define_method(cContext, "dead?", Context_dead, 0);
   rb_define_method(cContext, "ignored?", Context_ignored, 0);
@@ -406,6 +443,7 @@ Init_context(VALUE mDebase)
   rb_define_method(cContext, "frame_self", Context_frame_self, -1);
   rb_define_method(cContext, "stop_next=", Context_stop_next, -1);
   rb_define_method(cContext, "step", Context_stop_next, -1);
+  rb_define_method(cContext, "smart_step", Context_smart_step, 2);
   rb_define_method(cContext, "step_over", Context_step_over, -1);
   rb_define_method(cContext, "stop_frame=", Context_stop_frame, 1);
   rb_define_method(cContext, "pause", Context_pause, 0);

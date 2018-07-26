@@ -82,8 +82,6 @@ my_line_trace_specify(int line, rb_event_flag_t *events_ptr, void *ptr)
 static int
 my_first_line_trace_specify(int line, rb_event_flag_t *events_ptr, void *ptr)
 {
-    fprintf(stderr, "my_first_line_trace_specify %d\n", line);
-
     struct set_specifc_data *data = (struct set_specifc_data *)ptr;
 
     data->prev = *events_ptr & RUBY_EVENT_SPECIFIED_LINE ? 1 : 2;
@@ -166,7 +164,6 @@ static breakpoint_t* find_breakpoint_by_pos(char* path, int line) {
     breakpoint_list_node_t* breakpoint = breakpoint_list;
 
     while(breakpoint != NULL) {
-        //fprintf(stderr, "find_breakpoint2 %s:%s\n", breakpoint->breakpoint->source, path);
         if(strcmp (breakpoint->breakpoint->source, path) == 0 && breakpoint->breakpoint->line == line) {
             return breakpoint->breakpoint;
         }
@@ -180,7 +177,6 @@ static breakpoint_t* find_checkpoint_by_pos(char* path, int line) {
     breakpoint_list_node_t* breakpoint = checkpoint_list;
 
     while(breakpoint != NULL) {
-        fprintf(stderr, "find_breakpoint2 %s:%s\n", breakpoint->breakpoint->source, path);
         if(strcmp (breakpoint->breakpoint->source, path) == 0 && breakpoint->breakpoint->line == line) {
             return breakpoint->breakpoint;
         }
@@ -242,6 +238,13 @@ static void debug_print(VALUE v) {
     rb_funcall(rb_mKernel, sym_puts, 1, v);
 }
 
+static void debug_print_class(VALUE v) {
+    ID sym_puts = rb_intern("puts");
+    ID sym_inspect = rb_intern("class");
+    rb_funcall(rb_mKernel, sym_puts, 1,
+    rb_funcall(v, sym_inspect, 0));
+}
+
 rb_control_frame_t *
 my_rb_vm_get_binding_creatable_next_cfp(const rb_thread_t *th, const rb_control_frame_t *cfp)
 {
@@ -262,20 +265,14 @@ get_step_in_info(rb_control_frame_t* cfp) {
     step_in_info_t* ans = ALLOC(step_in_info_t);
     ans->size = 0;
 
-    if(cfp == NULL) {
-        fprintf(stderr, "#0\n");
-    }
-
     if(cfp->iseq != NULL)
     {
         if(cfp->pc == NULL || cfp->iseq->body == NULL)
         {
-            fprintf(stderr, "#4\n");
             return Qnil;
         }
         else
         {
-            fprintf(stderr, "#5\n");
             const rb_iseq_t *iseq = cfp->iseq;
             VALUE* code = rb_iseq_original_iseq(iseq);
 
@@ -284,10 +281,7 @@ get_step_in_info(rb_control_frame_t* cfp) {
             ptrdiff_t pc = cfp->pc - cfp->iseq->body->iseq_encoded;
             unsigned int size = cfp->iseq->body->iseq_size;
 
-            fprintf(stderr, "#6\n");
-
             for (n = pc; n < size;) {
-                fprintf(stderr, "#7\n");
                 VALUE insn = code[n];
                 char * instruction_name = insn_name(insn);
 
@@ -305,14 +299,10 @@ get_step_in_info(rb_control_frame_t* cfp) {
 
                         if (ci->mid) {
                             if(strcmp(instruction_name, "send") == 0) {
-                                ans->size++;
-                                //rb_ary_push(ans, rb_id2str(ci->mid));
-                                //rb_ary_push(ans, rb_sprintf("block for %"PRIsVALUE, rb_id2str(ci->mid)));
+                                ans->size += 2;
                             }
                             if(strcmp(instruction_name, "opt_send_without_block") == 0) {
                                 ans->size++;
-                                //fprintf(stderr, "opt_send_without_block\n");
-                                //rb_ary_push(ans, rb_id2str(ci->mid));
                             }
                         }
                     }
@@ -324,9 +314,9 @@ get_step_in_info(rb_control_frame_t* cfp) {
 
             step_in_variant_t** variants = (step_in_variant_t*)malloc(ans->size + 1);
             int i = 0;
+            VALUE mid_str = NULL;
 
-            for (int insn_iter = 0, n = pc; n < size; insn_iter++) {
-                fprintf(stderr, "#7\n");
+            for (int insn_iter = 0, n = pc; n < size; insn_iter++, mid_str = NULL) {
                 VALUE insn = code[n];
                 char * instruction_name = insn_name(insn);
 
@@ -347,25 +337,33 @@ get_step_in_info(rb_control_frame_t* cfp) {
                                 step_in_variant_t* variant = ALLOC(step_in_variant_t);
                                 variant->mid = rb_id2str(ci->mid);
                                 variant->pc_offset = insn_iter;
+                                variant->block_iseq = NULL;
                                 variant->pc = n + insn_len(insn);
-                                variants[i] = variant;
-                                i++;
-//                                step_in_variants_number += 2;
-//                                rb_ary_push(ans, rb_id2str(ci->mid));
-//                                rb_ary_push(ans, rb_sprintf("block for %"PRIsVALUE, rb_id2str(ci->mid)));
+                                variants[i++] = variant;
+                                mid_str = rb_id2str(ci->mid);
                             }
                             if(strcmp(instruction_name, "opt_send_without_block") == 0) {
                                 step_in_variant_t* variant = ALLOC(step_in_variant_t);
                                 variant->mid = rb_id2str(ci->mid);
                                 variant->pc_offset = insn_iter;
-                                variants[i] = variant;
-                                i++;
+                                variant->block_iseq = NULL;
+                                variant->pc = n + insn_len(insn);
+                                variants[i++] = variant;
                             }
                         }
                     }
 
                     if(type == TS_ISEQ) {
-                        my_rb_iseqw_line_trace_specify(op, 0, Qtrue);
+                        if(mid_str != NULL) {
+                            step_in_variant_t* variant = ALLOC(step_in_variant_t);
+                            variant->mid = rb_sprintf("block for %"PRIsVALUE, mid_str);
+                            variant->pc_offset = insn_iter;
+                            variant->block_iseq = op;
+                            variant->pc = n + insn_len(insn);
+                            variants[i++] = variant;
+
+                            mid_str = NULL;
+                        }
                     }
                 }
 
@@ -377,8 +375,7 @@ get_step_in_info(rb_control_frame_t* cfp) {
     return ans;
 }
 
-static void
-c_add_breakpoint_first_line(rb_iseq_t *iseq)
+void c_add_breakpoint_first_line(rb_iseq_t *iseq)
 {
     my_rb_iseqw_first_line_trace_specify(rb_iseqw_new(iseq), Qtrue);
 }
@@ -386,6 +383,8 @@ c_add_breakpoint_first_line(rb_iseq_t *iseq)
 static void
 process_call_event(VALUE trace_point, void *data)
 {
+    VALUE path;
+    VALUE lineno;
     VALUE context_object;
     breakpoint_t* breakpoint;
     debug_context_t *context;
@@ -394,6 +393,14 @@ process_call_event(VALUE trace_point, void *data)
     int line;
     int n;
     char type;
+
+    tp = TRACE_POINT;
+    path = rb_tracearg_path(tp);
+    lineno = rb_tracearg_lineno(tp);
+    file = RSTRING_PTR(path);
+    line = FIX2INT(lineno);
+
+    fprintf(stdout, "%s:%d\n", file, line);
 
     context_object = Debase_current_context(mDebase);
     Data_Get_Struct(context_object, debug_context_t, context);
@@ -405,8 +412,7 @@ process_call_event(VALUE trace_point, void *data)
     rb_control_frame_t *prev_cfp = cfp + 1;
 
     int pc = prev_cfp->pc - prev_cfp->iseq->body->iseq_encoded;
-    fprintf(stderr, "cfp->pc %d == context->stop_pc %d\n", pc, context->stop_pc);
-    fprintf(stderr, "context->cfp %d == cfp %d\n", (void*)context->cfp, (void*)cfp);
+
     if(pc == context->stop_pc) {
         c_add_breakpoint_first_line(cfp->iseq);
         Debase_call_tracepoint_disable();
@@ -434,7 +440,6 @@ process_line_event(VALUE trace_point, void *data)
     line = FIX2INT(lineno);
 
     breakpoint = find_breakpoint_by_pos(file, line);
-    fprintf(stderr, "call_at_line(context, %s, %d, context_object);\n", file, line);
 
     context_object = Debase_current_context(mDebase);
     Data_Get_Struct(context_object, debug_context_t, context);
@@ -446,15 +451,91 @@ process_line_event(VALUE trace_point, void *data)
 
     cfp = my_rb_vm_get_binding_creatable_next_cfp(thread, cfp);
 
-    context->stop_reason = CTX_STOP_BREAKPOINT;
+    rb_iseq_t *iseq = cfp->iseq;
+
+    VALUE *generated_iseq;
+    unsigned int size = iseq->body->iseq_size;
+    generated_iseq = ALLOC_N(VALUE, size + 1);
+
+    int i, j;
+
+    int should = 1;
+
+    for(i = 0; i < iseq->body->line_info_size; i++) {
+        fprintf(stderr, "%d) iseq_line_info_entry.position %d, iseq_line_info_entry.line_no %d\n", i, iseq->body->line_info_table[i].position,  iseq->body->line_info_table[i].line_no);
+    }
+    VALUE* code = rb_iseq_original_iseq(iseq);
+
+    for(i = 0, j = 0; i < size; ) {
+        fprintf(stderr, "i = %d\n", i);
+        VALUE insn = code[i];
+        fprintf(stderr, "insn = %d\n", (int)insn);
+        int len = insn_len(insn);
+        const char *types = insn_op_types(insn);
+
+        if((int)insn == 42) {
+            for(int dx = 0; dx < 2; dx++) {
+                fprintf(stderr, "op = %d\n", (int)types[dx]);
+            }
+            for(int dx = 0; dx < len; dx++) {
+                fprintf(stderr, "iseq_encoded %d\n", (int)iseq->body->iseq_encoded[i + dx + 1]);
+            }
+        }
+
+        if(types[0] == TS_CALLINFO && should) {
+            fprintf(stderr, "if(types[0] == TS_CALLINFO && should)\n");
+            generated_iseq[j++] = BIN(trace);
+            generated_iseq[j++] = INT2FIX(RUBY_EVENT_LINE);
+            should = 0;
+        }
+
+        generated_iseq[j++] = iseq->body->iseq_encoded[i];
+
+        for(int dx = 0; dx < len; dx++) {
+            generated_iseq[j + dx + 1] = iseq->body->iseq_encoded[i + dx + 1];
+            j++;
+        }
+
+        i += len;
+    }
+
+    fprintf(stderr, "#1\n");
+
+    cfp->iseq->body->iseq_encoded = generated_iseq;
+    cfp->iseq->body->iseq_size += 2;
+    size = cfp->iseq->body->iseq_size;
+
+    fprintf(stderr, "#2\n");
+
+    cfp->iseq->body->mark_ary = ISEQ_FLIP_CNT(iseq);
+
+    fprintf(stderr, "#3\n");
+
+    code = rb_iseq_original_iseq(iseq);
+
+    fprintf(stderr, "#4\n");
+
+    VALUE str = rb_str_new(0, 0);
+    VALUE child = rb_ary_tmp_new(3);
+    for (n = 0; n < size;) {
+        VALUE insn = code[n];
+
+        fprintf(stderr, "n = %d %s\n", n, insn_name(insn));
+        n += rb_iseq_disasm_insn(str, code, n, iseq, child);
+    }
+
+    debug_print(str);
+
     context->step_in_info = get_step_in_info(cfp);
 
-    fprintf(stderr, "debase_internals %d\n", (void*)ruby_current_thread);
+
 
     rb_ensure(start_inspector, context_object, stop_inspector, Qnil);
     if(breakpoint != NULL) {
+        context->stop_reason = CTX_STOP_BREAKPOINT;
         rb_funcall(context_object, idAtBreakpoint, 1, INT2NUM(breakpoint->id));
     }
+    context->stop_reason = CTX_STOP_STEP;
 
     reset_stepping_stop_points(context);
     call_at_line(context, file, line, context_object);
@@ -496,39 +577,6 @@ Debase_call_tracepoint_disable()
   rb_tracepoint_disable(tpCall);
 
   return Qnil;
-}
-
-static void
-c_block_add_breakpoint(rb_iseq_t *iseq)
-{
-    int i;
-    VALUE *code;
-    VALUE child = rb_ary_tmp_new(3);
-    unsigned int size;
-    size_t n;
-    VALUE str = rb_str_new(0, 0);
-
-    size = iseq->body->line_info_size;
-    const struct iseq_line_info_entry *table = iseq->body->line_info_table;
-
-    int left = 0;
-    int right = size;
-
-    int cnt = 0;
-
-    my_rb_iseqw_line_trace_specify(rb_iseqw_new(iseq), lineno, Qtrue);
-
-    size = iseq->body->iseq_size;
-    code = rb_iseq_original_iseq(iseq);
-    for (n = 0; n < size;) {
-        n += rb_iseq_disasm_insn(str, code, n, iseq, child);
-    }
-
-    for (i = 0; i < RARRAY_LEN(child); i++) {
-        VALUE isv = rb_ary_entry(child, i);
-        rb_iseq_t *tmp_iseq = rb_iseq_check((rb_iseq_t *)isv);
-        c_add_breakpoint(lineno, tmp_iseq);
-    }
 }
 
 static void
@@ -588,8 +636,6 @@ static void walk_throw_frames(rb_thread_t *th, char* source, int line)
                 if (cfp->pc) {
                     const rb_iseq_t *iseq = cfp->iseq;
                     char* file = RSTRING_PTR(StringValue(iseq->body->location.path));
-
-                    fprintf(stderr, "%s %s\n", source, file);
 
                     if(strcmp (source, file) == 0) {
                         c_add_breakpoint(line, iseq);

@@ -108,6 +108,7 @@ extern void reset_stepping_stop_points(debug_context_t *context);
 extern VALUE Context_ignored(VALUE self);
 extern void fill_stack(debug_context_t *context, const rb_debug_inspector_t *inspector);
 extern void clear_stack(debug_context_t *context);
+extern void c_add_breakpoint_first_line(rb_iseq_t *iseq);
 
 /* locked threads container */
 /* types */

@@ -29,7 +29,12 @@ require "debase/ruby_core_source"
 
 hdrs = proc {
   have_header("vm_core.h")
+  have_header("iseq.h")
   have_header("version.h")
+  have_header("vm_core.h")
+  have_header("vm_insnhelper.h")
+  have_header("vm_core.h")
+  have_header("method.h")
 }
 
 # Allow use customization of compile options. For example, the
