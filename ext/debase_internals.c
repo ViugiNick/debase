@@ -455,63 +455,70 @@ process_line_event(VALUE trace_point, void *data)
 
     VALUE *generated_iseq;
     unsigned int size = iseq->body->iseq_size;
-    generated_iseq = ALLOC_N(VALUE, size + 1);
+    generated_iseq = ALLOC_N(VALUE, size + 2);
 
     int i, j;
 
     int should = 1;
 
+    struct iseq_line_info_entry *line_info_table;
+    line_info_table = ALLOC_N(struct iseq_line_info_entry, iseq->body->line_info_size + 1);
     for(i = 0; i < iseq->body->line_info_size; i++) {
-        fprintf(stderr, "%d) iseq_line_info_entry.position %d, iseq_line_info_entry.line_no %d\n", i, iseq->body->line_info_table[i].position,  iseq->body->line_info_table[i].line_no);
+        line_info_table[i].position = iseq->body->line_info_table[i].position;
+        line_info_table[i].line_no = iseq->body->line_info_table[i].line_no;
     }
+
     VALUE* code = rb_iseq_original_iseq(iseq);
 
     for(i = 0, j = 0; i < size; ) {
-        fprintf(stderr, "i = %d\n", i);
+        //fprintf(stderr, "i = %d\n", i);
         VALUE insn = code[i];
-        fprintf(stderr, "insn = %d\n", (int)insn);
+        //fprintf(stderr, "insn = %d\n", (int)insn);
         int len = insn_len(insn);
         const char *types = insn_op_types(insn);
 
-        if((int)insn == 42) {
-            for(int dx = 0; dx < 2; dx++) {
-                fprintf(stderr, "op = %d\n", (int)types[dx]);
-            }
-            for(int dx = 0; dx < len; dx++) {
-                fprintf(stderr, "iseq_encoded %d\n", (int)iseq->body->iseq_encoded[i + dx + 1]);
-            }
-        }
-
         if(types[0] == TS_CALLINFO && should) {
-            fprintf(stderr, "if(types[0] == TS_CALLINFO && should)\n");
+            //fprintf(stderr, "if(types[0] == TS_CALLINFO && should) %d %d\n", j, i);
+            line_info_table[iseq->body->line_info_size].position = j;
+            line_info_table[iseq->body->line_info_size].line_no = line;
+
+            fprintf(stderr, "j-%d\n", j);
             generated_iseq[j++] = BIN(trace);
+            fprintf(stderr, "j-%d\n", j);
             generated_iseq[j++] = INT2FIX(RUBY_EVENT_LINE);
             should = 0;
         }
 
-        generated_iseq[j++] = iseq->body->iseq_encoded[i];
+        //fprintf(stderr, "j-%d, i-%d\n", j, i);
+        //generated_iseq[j] = iseq->body->iseq_encoded[i];
 
         for(int dx = 0; dx < len; dx++) {
-            generated_iseq[j + dx + 1] = iseq->body->iseq_encoded[i + dx + 1];
-            j++;
+            fprintf(stderr, "j-%d, i-%d\n", j + dx, i + dx);
+            generated_iseq[j + dx] = iseq->body->iseq_encoded[i + dx];
         }
 
         i += len;
+        j += len;
     }
 
     fprintf(stderr, "#1\n");
 
     cfp->iseq->body->iseq_encoded = generated_iseq;
     cfp->iseq->body->iseq_size += 2;
+    cfp->iseq->body->line_info_table = line_info_table;
     size = cfp->iseq->body->iseq_size;
 
     fprintf(stderr, "#2\n");
 
-    cfp->iseq->body->mark_ary = ISEQ_FLIP_CNT(iseq);
+    //debug_print(cfp->iseq->body->mark_ary);
+
+    cfp->iseq->body->mark_ary = ISEQ_FLIP_CNT(cfp->iseq);
+    //debug_print(Qnil);
+    //debug_print(cfp->iseq->body->mark_ary);
 
     fprintf(stderr, "#3\n");
 
-    code = rb_iseq_original_iseq(iseq);
+    code = rb_iseq_original_iseq(cfp->iseq);
 
     fprintf(stderr, "#4\n");
 
