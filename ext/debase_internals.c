@@ -6,6 +6,7 @@
 #include <string.h>
 #include <assert.h>
 #include <stdarg.h>
+#include <execinfo.h>
 
 static VALUE mDebase;                 /* Ruby Debase Module object */
 static VALUE cContext;
@@ -18,7 +19,9 @@ static breakpoint_list_node_t* checkpoint_list = NULL;
 
 static VALUE idAlive;
 static VALUE tpLine;
+static VALUE tpLine2;
 static VALUE tpCall;
+static VALUE tpRaise;
 static VALUE idAtLine;
 static VALUE idAtBreakpoint;
 static VALUE idMpLoadIseq;
@@ -56,6 +59,7 @@ iseqw_check(VALUE iseqw)
 struct set_specifc_data {
     int pos;
     int set;
+    int order;
     int prev; /* 1: set, 2: unset, 0: not found */
 };
 
@@ -65,18 +69,23 @@ my_line_trace_specify(int line, rb_event_flag_t *events_ptr, void *ptr)
     struct set_specifc_data *data = (struct set_specifc_data *)ptr;
 
     if (data->pos == line) {
-        data->prev = *events_ptr & RUBY_EVENT_SPECIFIED_LINE ? 1 : 2;
-        if (data->set) {
-            *events_ptr = *events_ptr | RUBY_EVENT_SPECIFIED_LINE;
+        fprintf(stderr, "my_line_trace_specify %d %d\n", data->pos, data->order);
+
+        if(data->order == 0) {
+            data->prev = *events_ptr & RUBY_EVENT_SPECIFIED_LINE ? 1 : 2;
+            if (data->set) {
+                *events_ptr = *events_ptr | RUBY_EVENT_SPECIFIED_LINE;
+            }
+            else {
+                *events_ptr = *events_ptr & ~RUBY_EVENT_SPECIFIED_LINE;
+            }
+            return 0; /* found */
         }
         else {
-            *events_ptr = *events_ptr & ~RUBY_EVENT_SPECIFIED_LINE;
+            data->order--;
         }
-        return 0; /* found */
     }
-    else {
-	    return 1;
-    }
+    return 1;
 }
 
 static int
@@ -95,12 +104,13 @@ my_first_line_trace_specify(int line, rb_event_flag_t *events_ptr, void *ptr)
 }
 
 VALUE
-my_rb_iseqw_line_trace_specify(VALUE iseqval, int needed_line, VALUE set)
+my_rb_iseqw_line_trace_specify_order(VALUE iseqval, int needed_line, int order, VALUE set)
 {
     struct set_specifc_data data;
 
     data.prev = 0;
     data.pos = needed_line;
+    data.order = order;
     if (data.pos < 0) rb_raise(rb_eTypeError, "`pos' is negative");
 
     switch (set) {
@@ -113,6 +123,12 @@ my_rb_iseqw_line_trace_specify(VALUE iseqval, int needed_line, VALUE set)
     rb_iseqw_line_trace_each(iseqval, my_line_trace_specify, (void *)&data);
 
     return data.prev == 1 ? Qtrue : Qfalse;
+}
+
+VALUE
+my_rb_iseqw_line_trace_specify(VALUE iseqval, int needed_line, VALUE set)
+{
+    return my_rb_iseqw_line_trace_specify_order(iseqval, needed_line, 0, set);
 }
 
 VALUE
@@ -381,6 +397,36 @@ void c_add_breakpoint_first_line(rb_iseq_t *iseq)
 }
 
 static void
+process_raise_event(VALUE trace_point, void *data)
+{
+  VALUE path;
+  VALUE lineno;
+  VALUE context_object;
+  VALUE hit_count;
+  VALUE exception_name;
+  debug_context_t *context;
+  rb_trace_point_t *tp;
+  char *file;
+  int line;
+  int c_hit_count;
+
+  context_object = Debase_current_context(mDebase);
+  Data_Get_Struct(context_object, debug_context_t, context);
+  if (!check_start_processing(context, rb_thread_current())) return;
+
+  update_stack_size(context);
+  tp = TRACE_POINT;
+
+  path = rb_tracearg_path(tp);
+  lineno = rb_tracearg_lineno(tp);
+
+  file = RSTRING_PTR(path);
+  line = FIX2INT(lineno);
+
+  fprintf(stdout, "process raise %s:%d\n", file, line);
+}
+
+static void
 process_call_event(VALUE trace_point, void *data)
 {
     VALUE path;
@@ -439,6 +485,8 @@ process_line_event(VALUE trace_point, void *data)
     file = RSTRING_PTR(path);
     line = FIX2INT(lineno);
 
+    fprintf(stderr, "process line %s %d\n", file, line);
+
     breakpoint = find_breakpoint_by_pos(file, line);
 
     context_object = Debase_current_context(mDebase);
@@ -448,6 +496,36 @@ process_line_event(VALUE trace_point, void *data)
     rb_control_frame_t *cfp;
     thread = ruby_current_thread;
     cfp = TH_CFP(thread);
+    rb_control_frame_t *tmp_cfp = cfp;
+
+    VALUE* code;
+
+    VALUE str = rb_str_new(0, 0);
+    VALUE child = rb_ary_tmp_new(3);
+
+    fprintf(stderr, "pc = %d\n", tmp_cfp->pc - tmp_cfp->iseq->body->iseq_encoded);
+
+    if(line == 4) {
+        tmp_cfp++;
+        code = rb_iseq_original_iseq(tmp_cfp->iseq);
+        for (n = 0; n < tmp_cfp->iseq->body->iseq_size;) {
+            VALUE insn = code[n];
+
+            //fprintf(stderr, "n = %d %s\n", n, insn_name(insn));
+            n += rb_iseq_disasm_insn(str, code, n, tmp_cfp->iseq, child);
+        }
+
+        fprintf(stderr, "pc = %d\n", tmp_cfp->pc - tmp_cfp->iseq->body->iseq_encoded);
+
+        debug_print(str);
+    }
+
+
+//    for(int jj = 0; jj < 15; jj++, tmp_cfp++) {
+//        if(tmp_cfp->pc) {
+//            fprintf(stderr, "%d) %d\n", jj, tmp_cfp->pc - tmp_cfp->iseq->body->iseq_encoded);
+//        }
+//    }
 
     cfp = my_rb_vm_get_binding_creatable_next_cfp(thread, cfp);
 
@@ -459,16 +537,23 @@ process_line_event(VALUE trace_point, void *data)
 
     int i, j;
 
-    int should = 1;
+    int should = 2;
 
     struct iseq_line_info_entry *line_info_table;
     line_info_table = ALLOC_N(struct iseq_line_info_entry, iseq->body->line_info_size + 1);
-    for(i = 0; i < iseq->body->line_info_size; i++) {
-        line_info_table[i].position = iseq->body->line_info_table[i].position;
-        line_info_table[i].line_no = iseq->body->line_info_table[i].line_no;
-    }
+//    for(i = 0; i < iseq->body->line_info_size; i++) {
+//        line_info_table[i].position = iseq->body->line_info_table[i].position;
+//        line_info_table[i].line_no = iseq->body->line_info_table[i].line_no;
+//    }
 
-    VALUE* code = rb_iseq_original_iseq(iseq);
+    code = rb_iseq_original_iseq(iseq);
+
+
+    //for(int jj = 0; jj < size; jj++) {
+    //    fprintf(stderr, "%d) %d\n", jj, (int)iseq->body->iseq_encoded[jj]);
+    //}
+
+    int pc = cfp->pc - cfp->iseq->body->iseq_encoded;
 
     for(i = 0, j = 0; i < size; ) {
         //fprintf(stderr, "i = %d\n", i);
@@ -477,23 +562,45 @@ process_line_event(VALUE trace_point, void *data)
         int len = insn_len(insn);
         const char *types = insn_op_types(insn);
 
-        if(types[0] == TS_CALLINFO && should) {
-            //fprintf(stderr, "if(types[0] == TS_CALLINFO && should) %d %d\n", j, i);
-            line_info_table[iseq->body->line_info_size].position = j;
-            line_info_table[iseq->body->line_info_size].line_no = line;
+        //if(iseq->body->iseq_encoded[i] == BIN(trace)) {
+        //    fprintf(stderr, "BIN(trace) %d\n", (int)iseq->body->iseq_encoded[i]);
+        //}
 
-            fprintf(stderr, "j-%d\n", j);
-            generated_iseq[j++] = BIN(trace);
-            fprintf(stderr, "j-%d\n", j);
-            generated_iseq[j++] = INT2FIX(RUBY_EVENT_LINE);
-            should = 0;
+        if(types[0] == TS_CALLINFO && i > pc) {
+            if(should == 1) {
+                //fprintf(stderr, "if(types[0] == TS_CALLINFO && should) %d %d\n", j, i);
+                int ii = 0;
+                while(iseq->body->line_info_table[ii].position < j) {
+                    line_info_table[ii].position = iseq->body->line_info_table[ii].position;
+                    line_info_table[ii].line_no = iseq->body->line_info_table[ii].line_no;
+                    ii++;
+                }
+
+                line_info_table[ii].position = j;
+                line_info_table[ii].line_no = line;
+
+                for(; ii < iseq->body->line_info_size; ii++) {
+                    line_info_table[ii + 1].position = iseq->body->line_info_table[ii].position + 2;
+                    line_info_table[ii + 1].line_no = iseq->body->line_info_table[ii].line_no;
+                }
+
+                //fprintf(stderr, "j-%d\n", j);
+                generated_iseq[j++] = generated_iseq[0];
+
+                //fprintf(stderr, "j-%d\n", j);
+                generated_iseq[j++] = RUBY_EVENT_SPECIFIED_LINE | RUBY_EVENT_LINE;
+                should = 0;
+            }
+            else {
+                should--;
+            }
         }
 
         //fprintf(stderr, "j-%d, i-%d\n", j, i);
         //generated_iseq[j] = iseq->body->iseq_encoded[i];
 
         for(int dx = 0; dx < len; dx++) {
-            fprintf(stderr, "j-%d, i-%d\n", j + dx, i + dx);
+            //fprintf(stderr, "j-%d, i-%d\n", j + dx, i + dx);
             generated_iseq[j + dx] = iseq->body->iseq_encoded[i + dx];
         }
 
@@ -501,41 +608,49 @@ process_line_event(VALUE trace_point, void *data)
         j += len;
     }
 
-    fprintf(stderr, "#1\n");
+    if(line == 8) {
+        fprintf(stderr, "pc %d\n", pc);
+        //MEMCPY(cfp->iseq->body->iseq_encoded, generated_iseq, VALUE, cfp->iseq->body->iseq_size);
+        cfp->iseq->body->iseq_encoded = generated_iseq;
+        cfp->iseq->body->iseq_size += 2;
+        cfp->iseq->body->line_info_table = line_info_table;
+        cfp->iseq->body->line_info_size++;
+        size = cfp->iseq->body->iseq_size;
+        cfp->pc = cfp->iseq->body->iseq_encoded + pc;
+        SET_PC(cfp->iseq->body->iseq_encoded + pc);
+        fprintf(stderr, "cfp->pc = %d\n", cfp->pc - cfp->iseq->body->iseq_encoded);
+        //for(int ii = 0; ii < cfp->iseq->body->line_info_size; ii++) {
+        //    fprintf(stderr, "pos: %d line_no: %d\n", cfp->iseq->body->line_info_table[ii].position, cfp->iseq->body->line_info_table[ii].line_no);
+        //}
 
-    cfp->iseq->body->iseq_encoded = generated_iseq;
-    cfp->iseq->body->iseq_size += 2;
-    cfp->iseq->body->line_info_table = line_info_table;
-    size = cfp->iseq->body->iseq_size;
+        //fprintf(stderr, "#2\n");
 
-    fprintf(stderr, "#2\n");
+        //debug_print(cfp->iseq->body->mark_ary);
 
-    //debug_print(cfp->iseq->body->mark_ary);
+        cfp->iseq->body->mark_ary = iseq_mark_ary_create(0);
+        //debug_print(Qnil);
+        //debug_print(cfp->iseq->body->mark_ary);
 
-    cfp->iseq->body->mark_ary = ISEQ_FLIP_CNT(cfp->iseq);
-    //debug_print(Qnil);
-    //debug_print(cfp->iseq->body->mark_ary);
-
-    fprintf(stderr, "#3\n");
-
+        //fprintf(stderr, "#3\n");
+    }
     code = rb_iseq_original_iseq(cfp->iseq);
 
-    fprintf(stderr, "#4\n");
+    //fprintf(stderr, "#4\n");
 
-    VALUE str = rb_str_new(0, 0);
-    VALUE child = rb_ary_tmp_new(3);
+    str = rb_str_new(0, 0);
+    child = rb_ary_tmp_new(3);
     for (n = 0; n < size;) {
         VALUE insn = code[n];
 
-        fprintf(stderr, "n = %d %s\n", n, insn_name(insn));
+        //fprintf(stderr, "n = %d %s\n", n, insn_name(insn));
         n += rb_iseq_disasm_insn(str, code, n, iseq, child);
     }
 
     debug_print(str);
 
+    //my_rb_iseqw_line_trace_specify_order(rb_iseqw_new(cfp->iseq), line, 1, Qtrue);
+
     context->step_in_info = get_step_in_info(cfp);
-
-
 
     rb_ensure(start_inspector, context_object, stop_inspector, Qnil);
     if(breakpoint != NULL) {
@@ -564,6 +679,9 @@ Debase_setup_tracepoints(VALUE self)
 
   rb_tracepoint_enable(tpLine);
 
+  tpRaise = rb_tracepoint_new(Qnil, RUBY_EVENT_RAISE, process_raise_event, NULL);
+  rb_global_variable(&tpRaise);
+
   return Qnil;
 }
 
@@ -574,6 +692,7 @@ Debase_call_tracepoint_enable()
   rb_global_variable(&tpCall);
 
   rb_tracepoint_enable(tpCall);
+  rb_tracepoint_enable(tpRaise);
 
   return Qnil;
 }
@@ -669,27 +788,6 @@ static void walk_throw_threads(char* source, int line)
             }
         }
 }
-
-//static VALUE
-//Debase_add_catchpoint(VALUE self, VALUE source, VALUE line)
-//{
-//    breakpoint_t *breakpoint;
-//    breakpoint_list_node_t *breakpoint_node;
-//
-//    breakpoint = ALLOC(breakpoint_t);
-//
-//    breakpoint->source = RSTRING_PTR(StringValue(source));
-//    breakpoint->line = FIX2INT(line);
-//
-//    breakpoint_node = ALLOC(breakpoint_list_node_t);
-//    breakpoint_node->breakpoint = breakpoint;
-//    breakpoint_node->next = checkpoint_list;
-//    checkpoint_list = breakpoint_node;
-//
-//    walk_throw_threads(breakpoint->source, breakpoint->line);
-//
-//    return INT2NUM(breakpoint->id);
-//}
 
 static VALUE
 Debase_add_breakpoint(VALUE self, VALUE source, VALUE line, VALUE expr)
