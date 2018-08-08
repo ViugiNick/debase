@@ -19,7 +19,7 @@ module Debase
 
     module InstructionSequenceMixin
       def load_iseq(path)
-        puts "load_iseq #{path}"
+        #puts "load_iseq #{path}"
         iseq = RubyVM::InstructionSequence.compile_file(path)
 
         Debugger.handle_iseq(path, iseq);

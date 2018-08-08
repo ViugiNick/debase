@@ -9,6 +9,7 @@
 #include <vm_insnhelper.h>
 #include <method.h>
 #include <internal.h>
+#include <gc.h>
 
 #include "insns.inc"
 #include "insns_info.inc"

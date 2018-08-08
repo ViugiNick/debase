@@ -56,6 +56,8 @@ iseqw_check(VALUE iseqw)
     return iseq;
 }
 
+static void add_traces(rb_iseq_t* iseq);
+
 struct set_specifc_data {
     int pos;
     int set;
@@ -69,8 +71,6 @@ my_line_trace_specify(int line, rb_event_flag_t *events_ptr, void *ptr)
     struct set_specifc_data *data = (struct set_specifc_data *)ptr;
 
     if (data->pos == line) {
-        fprintf(stderr, "my_line_trace_specify %d %d\n", data->pos, data->order);
-
         if(data->order == 0) {
             data->prev = *events_ptr & RUBY_EVENT_SPECIFIED_LINE ? 1 : 2;
             if (data->set) {
@@ -446,8 +446,6 @@ process_call_event(VALUE trace_point, void *data)
     file = RSTRING_PTR(path);
     line = FIX2INT(lineno);
 
-    fprintf(stdout, "%s:%d\n", file, line);
-
     context_object = Debase_current_context(mDebase);
     Data_Get_Struct(context_object, debug_context_t, context);
 
@@ -463,10 +461,6 @@ process_call_event(VALUE trace_point, void *data)
         c_add_breakpoint_first_line(cfp->iseq);
         Debase_call_tracepoint_disable();
     }
-}
-
-void updataPC() {
-    fprintf(stderr, "updataPC\n");
 }
 
 static void
@@ -488,8 +482,6 @@ process_line_event(VALUE trace_point, void *data)
     lineno = rb_tracearg_lineno(tp);
     file = RSTRING_PTR(path);
     line = FIX2INT(lineno);
-
-    fprintf(stderr, "process line %s %d\n", file, line);
 
     breakpoint = find_breakpoint_by_pos(file, line);
 
@@ -735,15 +727,52 @@ static breakpoint_t* find_breakpoint(char* path) {
     return NULL;
 }
 
+static void add_traces_children(rb_iseq_t* iseq, VALUE *code) {
+    unsigned int i;
+    VALUE all_children = rb_obj_hide(rb_ident_hash_new());
+    VALUE child;
+    const struct rb_iseq_constant_body *const body = iseq->body;
+
+    if(iseq->body == NULL) {
+        return;
+    }
+
+    if (body->catch_table) {
+        for (i = 0; i < body->catch_table->size; i++) {
+            const struct iseq_catch_table_entry *entry = &body->catch_table->entries[i];
+            if(entry->iseq) {
+                add_traces(entry->iseq);
+            }
+        }
+    }
+
+    for (i=0; i<body->iseq_size;) {
+        VALUE insn = code[i];
+        int len = insn_len(insn);
+        const char *types = insn_op_types(insn);
+        int j;
+
+        for (j=0; types[j]; j++) {
+            switch (types[j]) {
+                  case TS_ISEQ:
+                    child = code[i+j+1];
+                    if (child) {
+                        add_traces(rb_iseq_check((rb_iseq_t *)child));
+                    }
+                    break;
+                  default:
+                    break;
+            }
+        }
+        i += len;
+    }
+}
+
 static void add_traces(rb_iseq_t* iseq) {
     if(iseq == NULL || iseq->body == NULL || iseq->body->iseq_encoded == NULL) {
         return;
     }
 
-    VALUE dsms = rb_iseq_disasm(iseq);
-    fprintf(stderr, "%s\n", StringValueCStr(dsms));
-
-    fprintf(stderr, "add_traces\n");
     VALUE *generated_iseq;
     VALUE *code;
     int ii, jj, i, j, cnt = 0;
@@ -755,41 +784,59 @@ static void add_traces(rb_iseq_t* iseq) {
     VALUE str = rb_str_new(0, 0);
     code = rb_iseq_original_iseq(iseq);
 
+    int *added_traces = malloc(sizeof(int) * size + 2 * cnt);
+    added_traces[0] = 0;
+
     for(i = 0; i < size; ) {
         VALUE insn = code[i];
         int len = insn_len(insn);
         const char *types = insn_op_types(insn);
 
+        if(i > 0) {
+            added_traces[i] = added_traces[i - 1];
+        }
+
         if(types[0] == TS_CALLINFO) {
             cnt++;
+            added_traces[i] += 2;
         }
+
+        for(int dx = 0; dx < len; dx++) {
+            if(dx > 0) {
+                added_traces[i + dx] = added_traces[i + dx - 1];
+            }
+        }
+
         i += len;
     }
+
     generated_iseq = ALLOC_N(VALUE, size + 2 * cnt);
 
     struct iseq_line_info_entry *line_info_table;
     line_info_table = ALLOC_N(struct iseq_line_info_entry, iseq->body->line_info_size + cnt);
 
     VALUE trace_adr = NULL;
+    int dir;
 
     for(ii = 0, jj = 0, i = 0, j = 0; i < size; ) {
         VALUE insn = code[i];
         int len = insn_len(insn);
         const char *types = insn_op_types(insn);
 
-        if(((int)insn) == YARVINSN_jump) {
-            fprintf(stderr, "BIN(jump)\n");
-        }
-
         if(((int)insn) == YARVINSN_trace && trace_adr == NULL) {
             trace_adr = iseq->body->iseq_encoded[i];
         }
 
+        //if(types[0] == TS_OFFSET) {
+        //    fprintf(stderr, "TS_OFFSET %s %d\n", insn_name(insn), len);
+        //}
+
         if(types[0] == TS_CALLINFO) {
 
-            while(iseq->body->line_info_table[jj].position < j) {
+            while(iseq->body->line_info_table[jj].position < j && jj < iseq->body->line_info_size) {
                 line_info_table[ii].position = iseq->body->line_info_table[jj].position;
                 line_info_table[ii].line_no = iseq->body->line_info_table[jj].line_no;
+
                 ii++;
                 jj++;
             }
@@ -802,9 +849,13 @@ static void add_traces(rb_iseq_t* iseq) {
             generated_iseq[j++] = RUBY_EVENT_NONE;
         }
 
-
         for(int dx = 0; dx < len; dx++) {
             generated_iseq[j + dx] = iseq->body->iseq_encoded[i + dx];
+        }
+
+        if(types[0] == TS_OFFSET) {
+            dir = iseq->body->iseq_encoded[i + 1] + i + 2;
+            generated_iseq[j + 1] += added_traces[dir] - added_traces[i - 1];
         }
 
         i += len;
@@ -815,54 +866,36 @@ static void add_traces(rb_iseq_t* iseq) {
         line_info_table[ii].position = iseq->body->line_info_table[jj].position;
         line_info_table[ii].line_no = iseq->body->line_info_table[jj].line_no;
     }
-    fprintf(stderr, "add_traces1\n");
 
+    const struct iseq_catch_table *table = iseq->body->catch_table;
 
-    free(iseq->body->iseq_encoded);
-    fprintf(stderr, "add_traces11\n");
+    if (table) {
+        for (i = 0; i < table->size; i++) {
+            struct iseq_catch_table_entry *entry = &table->entries[i];
+            entry->start += added_traces[entry->start];
+            entry->end += added_traces[entry->end];
+            entry->cont += added_traces[entry->cont];
+            entry->sp += added_traces[entry->sp];
+        }
+    }
+
+    ruby_xfree((void *)iseq->body->iseq_encoded);
     iseq->body->iseq_encoded = generated_iseq;
-    fprintf(stderr, "add_traces12\n");
     iseq->body->iseq_size += 2 * cnt;
-    fprintf(stderr, "add_traces13\n");
-    free(iseq->body->line_info_table);
-    fprintf(stderr, "add_traces14\n");
+    xfree(iseq->body->line_info_table);
     iseq->body->line_info_table = line_info_table;
-    fprintf(stderr, "add_traces15\n");
     iseq->body->line_info_size += cnt;
 
-    fprintf(stderr, "fin i=%d j=%d\n", i, j);
-    fprintf(stderr, "fin ii=%d jj=%d\n", ii, jj);
-    fprintf(stderr, "iseq->body->iseq_size = %d\n", iseq->body->iseq_size);
-
-    //iseq->body->mark_ary = iseq_mark_ary_create(0);
+    RUBY_MARK_UNLESS_NULL(iseq->body->mark_ary);
     RB_OBJ_WRITE(iseq, &iseq->body->mark_ary, iseq_mark_ary_create((int)iseq->body->mark_ary));
 
-    fprintf(stderr, "fin ii=%d jj=%d\n", ii, jj);
-
-    fprintf(stderr, "add_traces2\n");
-
     code = rb_iseq_original_iseq(iseq);
-    fprintf(stderr, "add_traces2'\n");
-    for(i = 0; i < iseq->body->iseq_size; ) {
-        VALUE insn = code[i];
-        fprintf(stderr, "insn %d\n", i);
-        fprintf(stderr, "insn %s %d\n", insn_name(insn), i);
-        i += rb_iseq_disasm_insn(str, code, i, iseq, child);
-    }
-
-    fprintf(stderr, "add_traces3\n");
-
-    for (i = 0; i < RARRAY_LEN(child); i++) {
-        VALUE isv = rb_ary_entry(child, i);
-        rb_iseq_t *tmp_iseq = rb_iseq_check((rb_iseq_t *)isv);
-        add_traces(tmp_iseq);
-    }
-    fprintf(stderr, "fin add_traces\n");
+    free(added_traces);
+    add_traces_children(iseq, code);
 }
 
 static VALUE
 Debase_handle_iseq(VALUE self, VALUE path, VALUE file_iseq) {
-    fprintf(stderr, "Debase_handle_iseq#1\n");
     breakpoint_list_node_t* breakpoint = breakpoint_list;
     breakpoint_t* curr_breakpoint;
 
@@ -870,28 +903,16 @@ Debase_handle_iseq(VALUE self, VALUE path, VALUE file_iseq) {
 
     char* source = RSTRING_PTR(path);
 
-    VALUE str = rb_iseq_disasm(iseq);
-    printf("before %s\n", StringValueCStr(str));
-
-    fprintf(stderr, "Debase_handle_iseq#2\n");
     add_traces(iseq);
-    fprintf(stderr, "Debase_handle_iseq#3\n");
-
-    //str = rb_iseq_disasm(iseq);
-    //printf("after %s\n", StringValueCStr(str));
 
     while(breakpoint != NULL) {
         curr_breakpoint = breakpoint->breakpoint;
 
         if(strcmp (curr_breakpoint->source, source) == 0) {
-            fprintf(stderr, "go add\n");
             c_add_breakpoint(curr_breakpoint->line, iseq);
-            fprintf(stderr, "added\n");
         }
         breakpoint = breakpoint->next;
     }
-
-    fprintf(stderr, "Debase_handle_iseq#4\n");
 }
 
 static VALUE
