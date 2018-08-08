@@ -75,6 +75,10 @@ typedef struct debug_context {
   int thnum;
   int flags;
   
+  int should_step_in;
+  rb_iseq_t* iseq;
+  int pc;
+
   ctx_stop_reason stop_reason;
   int stop_next;
   int stop_line;

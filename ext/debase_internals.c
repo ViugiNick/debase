@@ -158,10 +158,10 @@ static void debug_class_print(VALUE v) {
 }
 
 static VALUE
-Debase_thread_context(VALUE self, VALUE thread)
+Debase_thread_context(VALUE self, const rb_thread_t* thread)
 {
   VALUE context;
-  context = rb_hash_aref(contexts, thread);
+  context = rb_hash_aref(contexts, (VALUE)thread);
   if (context == Qnil) {
     context = context_create(thread, cDebugThread);
     debug_class_print(context);
@@ -463,6 +463,10 @@ process_call_event(VALUE trace_point, void *data)
     }
 }
 
+static VALUE my_top_n(const rb_control_frame_t *cfp, int n) {
+    return cfp->sp + n;
+}
+
 static void
 process_line_event(VALUE trace_point, void *data)
 {
@@ -492,12 +496,28 @@ process_line_event(VALUE trace_point, void *data)
     rb_control_frame_t *cfp;
     thread = ruby_current_thread;
     cfp = TH_CFP(thread);
-    VALUE* code;
 
     cfp = my_rb_vm_get_binding_creatable_next_cfp(thread, cfp);
-
     rb_iseq_t *iseq = cfp->iseq;
 
+    if(context->should_step_in > 0) {
+        fprintf(stderr, "context->should_step_in %s %d\n", file, line);
+
+        int pc = cfp->pc - iseq->body->iseq_encoded;
+        printf("pc = %d\n", pc);
+        VALUE* code = rb_iseq_original_iseq(iseq);
+
+        struct rb_call_info *ci = (struct rb_call_info *)code[pc + 1];
+        struct rb_call_cache *cc = (struct rb_call_cache *)code[pc + 2];
+
+        VALUE klass = CLASS_OF(my_top_n(cfp, ci->orig_argc));
+        cc->me = rb_callable_method_entry(klass, ci->mid);
+
+        c_add_breakpoint_first_line(cc->me->def->body.iseq.iseqptr);
+    }
+
+    context->iseq = cfp->iseq;
+    context->pc = cfp->pc - cfp->iseq->body->iseq_encoded;
     context->step_in_info = get_step_in_info(cfp);
 
     rb_ensure(start_inspector, context_object, stop_inspector, Qnil);
@@ -729,7 +749,6 @@ static breakpoint_t* find_breakpoint(char* path) {
 
 static void add_traces_children(rb_iseq_t* iseq, VALUE *code) {
     unsigned int i;
-    VALUE all_children = rb_obj_hide(rb_ident_hash_new());
     VALUE child;
     const struct rb_iseq_constant_body *const body = iseq->body;
 
@@ -755,7 +774,7 @@ static void add_traces_children(rb_iseq_t* iseq, VALUE *code) {
         for (j=0; types[j]; j++) {
             switch (types[j]) {
                   case TS_ISEQ:
-                    child = code[i+j+1];
+                    child = code[i + j + 1];
                     if (child) {
                         add_traces(rb_iseq_check((rb_iseq_t *)child));
                     }
@@ -826,10 +845,6 @@ static void add_traces(rb_iseq_t* iseq) {
         if(((int)insn) == YARVINSN_trace && trace_adr == NULL) {
             trace_adr = iseq->body->iseq_encoded[i];
         }
-
-        //if(types[0] == TS_OFFSET) {
-        //    fprintf(stderr, "TS_OFFSET %s %d\n", insn_name(insn), len);
-        //}
 
         if(types[0] == TS_CALLINFO) {
 

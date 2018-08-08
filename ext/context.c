@@ -204,6 +204,11 @@ context_create(VALUE thread, VALUE cDebugThread) {
   context->stop_frame = -1;
   context->thread_pause = 0;
   context->stop_reason = CTX_STOP_NONE;
+
+  context->should_step_in = -1;
+  context->iseq = NULL;
+  context->pc = -1;
+
   reset_stepping_stop_points(context);
   if(rb_obj_class(thread) == cDebugThread) CTX_FL_SET(context, CTX_FL_IGNORE);
   return Data_Wrap_Struct(cContext, Context_mark, Context_free, context);
@@ -334,6 +339,28 @@ Context_pause(VALUE self)
   return Qtrue;
 }
 
+static void trace_on_next(rb_iseq_t *iseq, int pc) {
+    VALUE *iseq_original;
+    iseq_original = rb_iseq_original_iseq(iseq);
+    size_t insn;
+    unsigned int pos;
+
+    for (pos = pc; pos < iseq->body->iseq_size; pos += insn_len(insn)) {
+        insn = iseq_original[pos];
+
+        if (insn == BIN(trace)) {
+            fprintf(stderr, "trace_on_next %d\n", pos);
+            rb_event_flag_t current_events;
+
+            current_events = (rb_event_flag_t)iseq_original[pos+1];
+
+            VALUE *encoded = (VALUE *)iseq->body->iseq_encoded;
+            iseq_original[pos+1] = encoded[pos+1] = (VALUE)(current_events | RUBY_EVENT_LINE | RUBY_EVENT_SPECIFIED_LINE);
+            break;
+        }
+    }
+}
+
 static VALUE
 Context_stop_next(int argc, VALUE *argv, VALUE self)
 {
@@ -347,10 +374,15 @@ Context_stop_next(int argc, VALUE *argv, VALUE self)
   Data_Get_Struct(self, debug_context_t, context);
 
   context->stop_next = FIX2INT(steps);
+  context->should_step_in = 1;
+
+  trace_on_next(context->iseq, context->pc);
+
+  VALUE str = rb_iseq_disasm(context->iseq);
+  fprintf(stderr, "%s\n", StringValueCStr(str));
+
   context->cfp = TH_CFP(ruby_current_thread);
   context->stop_pc = context->step_in_info->variants[0]->pc;
-
-  Debase_call_tracepoint_enable();
 }
 
 static VALUE
@@ -372,7 +404,6 @@ Context_smart_step(VALUE self, VALUE rb_variant_id, VALUE force)
 
   context->cfp = TH_CFP(ruby_current_thread);
   context->stop_pc = variant->pc;
-  Debase_call_tracepoint_enable();
 }
 
 static VALUE
