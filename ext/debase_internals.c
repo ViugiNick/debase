@@ -29,6 +29,8 @@ static VALUE cDebugThread;
 static VALUE contexts;
 static VALUE breakpoints;
 
+#define MY_RCLASS_M_TBL(c) (RCLASS(c)->m_tbl)
+
 #if RUBY_API_VERSION_CODE >= 20500
   #if (RUBY_RELEASE_YEAR == 2017 && RUBY_RELEASE_MONTH == 10 && RUBY_RELEASE_DAY == 10) //workaround for 2.5.0-preview1
     #define TH_CFP(thread) ((rb_control_frame_t *)(thread)->ec.cfp)
@@ -464,7 +466,105 @@ process_call_event(VALUE trace_point, void *data)
 }
 
 static VALUE my_top_n(const rb_control_frame_t *cfp, int n) {
-    return cfp->sp + n;
+    return (*(cfp->sp -(n) - 1));
+}
+
+typedef ID id_key_t;
+
+static int
+list_id_table_lookup(struct list_id_table *tbl, ID id, VALUE *valp)
+{
+    id_key_t key = id2key(id);
+    int index = list_table_index(tbl, key);
+
+    if (index >= 0) {
+	*valp = TABLE_VALUES(tbl)[index];
+
+#if ID_TABLE_SWAP_RECENT_ACCESS
+	if (index > 0) {
+	    VALUE *values = TABLE_VALUES(tbl);
+	    id_key_t tk = tbl->keys[index-1];
+	    VALUE tv = values[index-1];
+	    tbl->keys[index-1] = tbl->keys[index];
+	    tbl->keys[index] = tk;
+	    values[index-1] = values[index];
+	    values[index] = tv;
+	}
+#endif /* ID_TABLE_SWAP_RECENT_ACCESS */
+	return TRUE;
+    }
+    else {
+	return FALSE;
+    }
+}
+
+static int
+hash_id_table_lookup(register sa_table *table, ID id, VALUE *valuep)
+{
+    register sa_entry *entry;
+    id_key_t key = id2key(id);
+
+    if (table->num_entries == 0) return 0;
+
+    entry = table->entries + calc_pos(table, key);
+    if (entry->next == SA_EMPTY) return 0;
+
+    if (entry->key == key) goto found;
+    if (entry->next == SA_LAST) return 0;
+
+    entry = table->entries + (entry->next - SA_OFFSET);
+    if (entry->key == key) goto found;
+
+    while(entry->next != SA_LAST) {
+        entry = table->entries + (entry->next - SA_OFFSET);
+        if (entry->key == key) goto found;
+    }
+    return 0;
+  found:
+    if (valuep) *valuep = entry->value;
+    return 1;
+}
+
+static int
+rb_id_table_lookup(struct mix_id_table *tbl, ID id, VALUE *valp)
+{
+    if (LIST_P(tbl)) return list_id_table_lookup(&tbl->aux.list, id, valp);
+    else             return hash_id_table_lookup(&tbl->aux.hash, id, valp);
+}
+
+static inline rb_method_entry_t *
+lookup_method_table(VALUE klass, ID id)
+{
+    fprintf(stderr, "#11\n");
+    st_data_t body;
+    fprintf(stderr, "#11'\n");
+    struct rb_id_table *m_tbl = RMODULE_M_TBL(klass);
+
+    fprintf(stderr, "#12\n");
+
+    if (rb_id_table_lookup(m_tbl, id, &body)) {
+	    return (rb_method_entry_t *) body;
+    }
+    else {
+	    return 0;
+    }
+}
+
+static inline rb_method_entry_t*
+search_method(VALUE klass, ID id, VALUE *defined_class_ptr)
+{
+    rb_method_entry_t *me;
+
+    for (me = 0; klass; klass = RCLASS_SUPER(klass)) {
+	    fprintf(stderr, "#1\n");
+	    if ((me = lookup_method_table(klass, id)) != 0)
+	        break;
+	    fprintf(stderr, "#2\n");
+    }
+
+    if (defined_class_ptr)
+	*defined_class_ptr = klass;
+    return me;
 }
 
 static void
@@ -510,8 +610,11 @@ process_line_event(VALUE trace_point, void *data)
         struct rb_call_info *ci = (struct rb_call_info *)code[pc + 1];
         struct rb_call_cache *cc = (struct rb_call_cache *)code[pc + 2];
 
+        VALUE defined_class;
+        fprintf(stderr, "ci->orig_argc: %d\n", ci->orig_argc);
         VALUE klass = CLASS_OF(my_top_n(cfp, ci->orig_argc));
-        cc->me = rb_callable_method_entry(klass, ci->mid);
+
+        cc->me = search_method(klass, ci->mid, &defined_class);
 
         c_add_breakpoint_first_line(cc->me->def->body.iseq.iseqptr);
     }

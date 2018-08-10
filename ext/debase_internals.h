@@ -8,7 +8,7 @@
 #include <iseq.h>
 #include <vm_insnhelper.h>
 #include <method.h>
-#include <internal.h>
+#include <id_table.h>
 #include <gc.h>
 
 #include "insns.inc"
