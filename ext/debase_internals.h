@@ -8,6 +8,7 @@
 #include <iseq.h>
 #include <vm_insnhelper.h>
 #include <method.h>
+#include <symbol.h>
 #include <id_table.h>
 #include <gc.h>
 

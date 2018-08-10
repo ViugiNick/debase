@@ -29,7 +29,73 @@ static VALUE cDebugThread;
 static VALUE contexts;
 static VALUE breakpoints;
 
-#define MY_RCLASS_M_TBL(c) (RCLASS(c)->m_tbl)
+#define         FALSE   0
+#define         TRUE    1
+
+typedef unsigned int sa_index_t;
+typedef rb_id_serial_t id_key_t;
+
+#define SA_EMPTY    0
+#define SA_LAST     1
+#define SA_OFFSET   2
+#define SA_MIN_SIZE 4
+
+typedef struct sa_entry {
+    sa_index_t next;
+    id_key_t key;
+    VALUE value;
+} sa_entry;
+
+typedef struct {
+    sa_index_t num_bins;
+    sa_index_t num_entries;
+    sa_index_t free_pos;
+    sa_entry *entries;
+} sa_table;
+
+struct list_id_table {
+    int capa;
+    int num;
+    id_key_t *keys;
+#if ID_TABLE_USE_CALC_VALUES == 0
+    VALUE *values_;
+#endif
+};
+
+typedef struct rb_id_item {
+    id_key_t key;
+#if SIZEOF_VALUE == 8
+    int      collision;
+#endif
+    VALUE    val;
+} item_t;
+
+struct hash_id_table {
+    int capa;
+    int num;
+    int used;
+    item_t *items;
+};
+
+struct mix_id_table {
+    union {
+	struct {
+	    int capa;
+	    int num;
+	} size;
+	struct list_id_table list;
+	struct hash_id_table hash;
+    } aux;
+};
+
+#if ID_TABLE_USE_CALC_VALUES
+    #define TABLE_VALUES(tbl) ((VALUE *)((tbl)->keys + (tbl)->capa))
+#else
+    #define TABLE_VALUES(tbl) (tbl)->values_
+#endif
+
+#define ID_TABLE_USE_MIX_LIST_MAX_CAPA 64
+#define LIST_P(mix)       ((mix)->aux.size.capa <= ID_TABLE_USE_MIX_LIST_MAX_CAPA)
 
 #if RUBY_API_VERSION_CODE >= 20500
   #if (RUBY_RELEASE_YEAR == 2017 && RUBY_RELEASE_MONTH == 10 && RUBY_RELEASE_DAY == 10) //workaround for 2.5.0-preview1
@@ -40,6 +106,34 @@ static VALUE breakpoints;
 #else
   #define TH_CFP(thread) ((rb_control_frame_t *)(thread)->cfp)
 #endif
+
+static inline id_key_t
+id2key(ID id)
+{
+    return rb_id_to_serial(id);
+}
+
+static int
+list_table_index(struct list_id_table *tbl, id_key_t key)
+{
+    const int num = tbl->num;
+    const id_key_t *keys = tbl->keys;
+
+#if ID_TABLE_USE_LIST_SORTED
+    return list_ids_bsearch(keys, key, num);
+#else /* ID_TABLE_USE_LIST_SORTED */
+    int i;
+
+    for (i=0; i<num; i++) {
+	assert(keys[i] != 0);
+
+	if (keys[i] == key) {
+	    return (int)i;
+	}
+    }
+    return -1;
+#endif
+}
 
 static int started = 0;
 
@@ -469,38 +563,40 @@ static VALUE my_top_n(const rb_control_frame_t *cfp, int n) {
     return (*(cfp->sp -(n) - 1));
 }
 
-typedef ID id_key_t;
-
 static int
 list_id_table_lookup(struct list_id_table *tbl, ID id, VALUE *valp)
 {
+    fprintf(stderr, "#16\n");
     id_key_t key = id2key(id);
     int index = list_table_index(tbl, key);
-
+    fprintf(stderr, "#18\n");
     if (index >= 0) {
-	*valp = TABLE_VALUES(tbl)[index];
-
-#if ID_TABLE_SWAP_RECENT_ACCESS
-	if (index > 0) {
-	    VALUE *values = TABLE_VALUES(tbl);
-	    id_key_t tk = tbl->keys[index-1];
-	    VALUE tv = values[index-1];
-	    tbl->keys[index-1] = tbl->keys[index];
-	    tbl->keys[index] = tk;
-	    values[index-1] = values[index];
-	    values[index] = tv;
-	}
-#endif /* ID_TABLE_SWAP_RECENT_ACCESS */
-	return TRUE;
+        fprintf(stderr, "#19\n");
+        *valp = TABLE_VALUES(tbl)[index];
+        fprintf(stderr, "#20\n");
+    #if ID_TABLE_SWAP_RECENT_ACCESS
+        if (index > 0) {
+            fprintf(stderr, "#20\n");
+            VALUE *values = TABLE_VALUES(tbl);
+            id_key_t tk = tbl->keys[index-1];
+            VALUE tv = values[index-1];
+            tbl->keys[index-1] = tbl->keys[index];
+            tbl->keys[index] = tk;
+            values[index-1] = values[index];
+            values[index] = tv;
+        }
+    #endif /* ID_TABLE_SWAP_RECENT_ACCESS */
+        return TRUE;
     }
     else {
-	return FALSE;
+	    return FALSE;
     }
 }
 
 static int
 hash_id_table_lookup(register sa_table *table, ID id, VALUE *valuep)
 {
+    fprintf(stderr, "#15\n");
     register sa_entry *entry;
     id_key_t key = id2key(id);
 
@@ -526,8 +622,9 @@ hash_id_table_lookup(register sa_table *table, ID id, VALUE *valuep)
 }
 
 static int
-rb_id_table_lookup(struct mix_id_table *tbl, ID id, VALUE *valp)
+my_id_table_lookup(struct mix_id_table *tbl, ID id, VALUE *valp)
 {
+    fprintf(stderr, "#14\n");
     if (LIST_P(tbl)) return list_id_table_lookup(&tbl->aux.list, id, valp);
     else             return hash_id_table_lookup(&tbl->aux.hash, id, valp);
 }
@@ -542,7 +639,8 @@ lookup_method_table(VALUE klass, ID id)
 
     fprintf(stderr, "#12\n");
 
-    if (rb_id_table_lookup(m_tbl, id, &body)) {
+    if (my_id_table_lookup(m_tbl, id, &body)) {
+	    fprintf(stderr, "#13\n");
 	    return (rb_method_entry_t *) body;
     }
     else {

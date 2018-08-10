@@ -37,7 +37,7 @@ hdrs = proc {
   have_header("version.h") and
   have_header("vm_core.h") and
   have_header("vm_insnhelper.h") and
-  have_header("id_table.h")
+  have_header("symbol.h")
 }
 
 # Allow use customization of compile options. For example, the
