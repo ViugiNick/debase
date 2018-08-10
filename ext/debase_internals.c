@@ -32,70 +32,170 @@ static VALUE breakpoints;
 #define         FALSE   0
 #define         TRUE    1
 
-typedef unsigned int sa_index_t;
-typedef rb_id_serial_t id_key_t;
-
-#define SA_EMPTY    0
-#define SA_LAST     1
-#define SA_OFFSET   2
-#define SA_MIN_SIZE 4
-
-typedef struct sa_entry {
-    sa_index_t next;
-    id_key_t key;
-    VALUE value;
-} sa_entry;
-
-typedef struct {
-    sa_index_t num_bins;
-    sa_index_t num_entries;
-    sa_index_t free_pos;
-    sa_entry *entries;
-} sa_table;
-
-struct list_id_table {
-    int capa;
-    int num;
-    id_key_t *keys;
-#if ID_TABLE_USE_CALC_VALUES == 0
-    VALUE *values_;
-#endif
-};
-
-typedef struct rb_id_item {
-    id_key_t key;
-#if SIZEOF_VALUE == 8
-    int      collision;
-#endif
-    VALUE    val;
-} item_t;
-
-struct hash_id_table {
-    int capa;
-    int num;
-    int used;
-    item_t *items;
-};
-
-struct mix_id_table {
-    union {
-	struct {
-	    int capa;
-	    int num;
-	} size;
-	struct list_id_table list;
-	struct hash_id_table hash;
-    } aux;
-};
-
-#if ID_TABLE_USE_CALC_VALUES
-    #define TABLE_VALUES(tbl) ((VALUE *)((tbl)->keys + (tbl)->capa))
-#else
-    #define TABLE_VALUES(tbl) (tbl)->values_
+#ifndef ID_TABLE_IMPL
+#define ID_TABLE_IMPL 34
 #endif
 
+#if ID_TABLE_IMPL == 0
+#define ID_TABLE_NAME st
+#define ID_TABLE_IMPL_TYPE struct st_id_table
+
+#define ID_TABLE_USE_ST 1
+#define ID_TABLE_USE_ST_DEBUG 1
+
+#elif ID_TABLE_IMPL == 1
+#define ID_TABLE_NAME st
+#define ID_TABLE_IMPL_TYPE struct st_id_table
+
+#define ID_TABLE_USE_ST 1
+#define ID_TABLE_USE_ST_DEBUG 0
+
+#elif ID_TABLE_IMPL == 11
+#define ID_TABLE_NAME list
+#define ID_TABLE_IMPL_TYPE struct list_id_table
+
+#define ID_TABLE_USE_LIST 1
+#define ID_TABLE_USE_CALC_VALUES 1
+
+#elif ID_TABLE_IMPL == 12
+#define ID_TABLE_NAME list
+#define ID_TABLE_IMPL_TYPE struct list_id_table
+
+#define ID_TABLE_USE_LIST 1
+#define ID_TABLE_USE_CALC_VALUES 1
+#define ID_TABLE_USE_ID_SERIAL 1
+
+#elif ID_TABLE_IMPL == 13
+#define ID_TABLE_NAME list
+#define ID_TABLE_IMPL_TYPE struct list_id_table
+
+#define ID_TABLE_USE_LIST 1
+#define ID_TABLE_USE_CALC_VALUES 1
+#define ID_TABLE_USE_ID_SERIAL 1
+#define ID_TABLE_SWAP_RECENT_ACCESS 1
+
+#elif ID_TABLE_IMPL == 14
+#define ID_TABLE_NAME list
+#define ID_TABLE_IMPL_TYPE struct list_id_table
+
+#define ID_TABLE_USE_LIST 1
+#define ID_TABLE_USE_CALC_VALUES 1
+#define ID_TABLE_USE_ID_SERIAL 1
+#define ID_TABLE_USE_LIST_SORTED 1
+
+#elif ID_TABLE_IMPL == 15
+#define ID_TABLE_NAME list
+#define ID_TABLE_IMPL_TYPE struct list_id_table
+
+#define ID_TABLE_USE_LIST 1
+#define ID_TABLE_USE_CALC_VALUES 1
+#define ID_TABLE_USE_ID_SERIAL 1
+#define ID_TABLE_USE_LIST_SORTED 1
+#define ID_TABLE_USE_LIST_SORTED_LINEAR_SMALL_RANGE 1
+
+#elif ID_TABLE_IMPL == 21
+#define ID_TABLE_NAME hash
+#define ID_TABLE_IMPL_TYPE sa_table
+
+#define ID_TABLE_USE_COALESCED_HASHING 1
+#define ID_TABLE_USE_ID_SERIAL 1
+
+#elif ID_TABLE_IMPL == 22
+#define ID_TABLE_NAME hash
+#define ID_TABLE_IMPL_TYPE struct hash_id_table
+
+#define ID_TABLE_USE_SMALL_HASH 1
+#define ID_TABLE_USE_ID_SERIAL 1
+
+#elif ID_TABLE_IMPL == 31
+#define ID_TABLE_NAME mix
+#define ID_TABLE_IMPL_TYPE struct mix_id_table
+
+#define ID_TABLE_USE_MIX 1
+#define ID_TABLE_USE_MIX_LIST_MAX_CAPA 32
+
+#define ID_TABLE_USE_ID_SERIAL 1
+
+#define ID_TABLE_USE_LIST 1
+#define ID_TABLE_USE_CALC_VALUES 1
+#define ID_TABLE_USE_SMALL_HASH 1
+
+#elif ID_TABLE_IMPL == 32
+#define ID_TABLE_NAME mix
+#define ID_TABLE_IMPL_TYPE struct mix_id_table
+
+#define ID_TABLE_USE_MIX 1
+#define ID_TABLE_USE_MIX_LIST_MAX_CAPA 32
+
+#define ID_TABLE_USE_ID_SERIAL 1
+
+#define ID_TABLE_USE_LIST 1
+#define ID_TABLE_USE_CALC_VALUES 1
+#define ID_TABLE_USE_LIST_SORTED 1
+
+#define ID_TABLE_USE_SMALL_HASH 1
+
+#elif ID_TABLE_IMPL == 33
+#define ID_TABLE_NAME mix
+#define ID_TABLE_IMPL_TYPE struct mix_id_table
+
+#define ID_TABLE_USE_MIX 1
 #define ID_TABLE_USE_MIX_LIST_MAX_CAPA 64
-#define LIST_P(mix)       ((mix)->aux.size.capa <= ID_TABLE_USE_MIX_LIST_MAX_CAPA)
+
+#define ID_TABLE_USE_ID_SERIAL 1
+
+#define ID_TABLE_USE_LIST 1
+#define ID_TABLE_USE_CALC_VALUES 1
+#define ID_TABLE_USE_SMALL_HASH 1
+
+#elif ID_TABLE_IMPL == 34
+#define ID_TABLE_NAME mix
+#define ID_TABLE_IMPL_TYPE struct mix_id_table
+
+#define ID_TABLE_USE_MIX 1
+#define ID_TABLE_USE_MIX_LIST_MAX_CAPA 64
+
+#define ID_TABLE_USE_ID_SERIAL 1
+
+#define ID_TABLE_USE_LIST 1
+#define ID_TABLE_USE_CALC_VALUES 1
+#define ID_TABLE_USE_LIST_SORTED 1
+
+#define ID_TABLE_USE_SMALL_HASH 1
+
+#elif ID_TABLE_IMPL == 35
+#define ID_TABLE_NAME mix
+#define ID_TABLE_IMPL_TYPE struct mix_id_table
+
+#define ID_TABLE_USE_MIX 1
+#define ID_TABLE_USE_MIX_LIST_MAX_CAPA 64
+
+#define ID_TABLE_USE_ID_SERIAL 1
+
+#define ID_TABLE_USE_LIST 1
+#define ID_TABLE_USE_CALC_VALUES 1
+#define ID_TABLE_USE_LIST_SORTED 1
+#define ID_TABLE_USE_LIST_SORTED_LINEAR_SMALL_RANGE 1
+
+#define ID_TABLE_USE_SMALL_HASH 1
+
+#else
+#error
+#endif
+
+#if ID_TABLE_SWAP_RECENT_ACCESS && ID_TABLE_USE_LIST_SORTED
+#error
+#endif
+
+/* IMPL(create) will be "hash_id_table_create" and so on */
+#define IMPL1(name, op) TOKEN_PASTE(name, _id##op) /* expand `name' */
+#define IMPL(op)        IMPL1(ID_TABLE_NAME, _table##op) /* but prevent `op' */
+
+#ifdef __GNUC__
+# define UNUSED(func) static func __attribute__((unused))
+#else
+# define UNUSED(func) static func
+#endif
 
 #if RUBY_API_VERSION_CODE >= 20500
   #if (RUBY_RELEASE_YEAR == 2017 && RUBY_RELEASE_MONTH == 10 && RUBY_RELEASE_DAY == 10) //workaround for 2.5.0-preview1
@@ -106,6 +206,50 @@ struct mix_id_table {
 #else
   #define TH_CFP(thread) ((rb_control_frame_t *)(thread)->cfp)
 #endif
+
+typedef rb_id_serial_t id_key_t;
+
+typedef struct rb_id_item {
+    id_key_t key;
+#if SIZEOF_VALUE == 8
+    int      collision;
+#endif
+    VALUE    val;
+} item_t;
+
+#if SIZEOF_VALUE == 8
+#define ITEM_GET_KEY(tbl, i) ((tbl)->items[i].key)
+#define ITEM_KEY_ISSET(tbl, i) ((tbl)->items[i].key)
+#define ITEM_COLLIDED(tbl, i) ((tbl)->items[i].collision)
+#define ITEM_SET_COLLIDED(tbl, i) ((tbl)->items[i].collision = 1)
+#else
+#define ITEM_GET_KEY(tbl, i) ((tbl)->items[i].key >> 1)
+#define ITEM_KEY_ISSET(tbl, i) ((tbl)->items[i].key > 1)
+#define ITEM_COLLIDED(tbl, i) ((tbl)->items[i].key & 1)
+#define ITEM_SET_COLLIDED(tbl, i) ((tbl)->items[i].key |= 1)
+#endif
+
+#if ID_TABLE_USE_CALC_VALUES
+    #define TABLE_VALUES(tbl) ((VALUE *)((tbl)->keys + (tbl)->capa))
+#else
+    #define TABLE_VALUES(tbl) (tbl)->values_
+#endif
+
+struct list_id_table {
+    int capa;
+    int num;
+    id_key_t *keys;
+#if ID_TABLE_USE_CALC_VALUES == 0
+    VALUE *values_;
+#endif
+};
+
+struct rb_id_table {
+    int capa;
+    int num;
+    int used;
+    item_t *items;
+};
 
 static inline id_key_t
 id2key(ID id)
@@ -119,20 +263,16 @@ list_table_index(struct list_id_table *tbl, id_key_t key)
     const int num = tbl->num;
     const id_key_t *keys = tbl->keys;
 
-#if ID_TABLE_USE_LIST_SORTED
-    return list_ids_bsearch(keys, key, num);
-#else /* ID_TABLE_USE_LIST_SORTED */
     int i;
 
     for (i=0; i<num; i++) {
-	assert(keys[i] != 0);
+    	assert(keys[i] != 0);
 
-	if (keys[i] == key) {
-	    return (int)i;
-	}
+        if (keys[i] == key) {
+            return (int)i;
+        }
     }
     return -1;
-#endif
 }
 
 static int started = 0;
@@ -487,9 +627,36 @@ get_step_in_info(rb_control_frame_t* cfp) {
     return ans;
 }
 
+static void trace_on_next(rb_iseq_t *iseq, int pc) {
+    VALUE *iseq_original;
+    iseq_original = rb_iseq_original_iseq(iseq);
+    size_t insn;
+    unsigned int pos;
+
+    for (pos = pc; pos < iseq->body->iseq_size; pos += insn_len(insn)) {
+        insn = iseq_original[pos];
+
+        if (insn == BIN(trace)) {
+            fprintf(stderr, "trace_on_next %d\n", pos);
+            rb_event_flag_t current_events;
+
+            current_events = (rb_event_flag_t)iseq_original[pos+1];
+
+            VALUE *encoded = (VALUE *)iseq->body->iseq_encoded;
+            iseq_original[pos+1] = encoded[pos+1] = (VALUE)(current_events | RUBY_EVENT_LINE | RUBY_EVENT_SPECIFIED_LINE);
+            break;
+        }
+    }
+}
+
 void c_add_breakpoint_first_line(rb_iseq_t *iseq)
 {
-    my_rb_iseqw_first_line_trace_specify(rb_iseqw_new(iseq), Qtrue);
+    VALUE str = rb_iseq_disasm(iseq);
+    fprintf(stderr, "c_add_breakpoint_first_line\n%s\n", StringValueCStr(str));
+    trace_on_next(iseq, 2);
+    str = rb_iseq_disasm(iseq);
+    fprintf(stderr, "after c_add_breakpoint_first_line\n%s\n", StringValueCStr(str));
+    //my_rb_iseqw_first_line_trace_specify(rb_iseqw_new(iseq), Qtrue);
 }
 
 static void
@@ -563,70 +730,25 @@ static VALUE my_top_n(const rb_control_frame_t *cfp, int n) {
     return (*(cfp->sp -(n) - 1));
 }
 
-static int
-list_id_table_lookup(struct list_id_table *tbl, ID id, VALUE *valp)
+typedef rb_id_serial_t id_key_t;
+
+int
+my_id_table_lookup(struct list_id_table *tbl, ID id, VALUE *valp)
 {
-    fprintf(stderr, "#16\n");
+    fprintf(stderr, "#14 %d %d\n", tbl->capa, tbl->num);
     id_key_t key = id2key(id);
     int index = list_table_index(tbl, key);
     fprintf(stderr, "#18\n");
     if (index >= 0) {
-        fprintf(stderr, "#19\n");
+        fprintf(stderr, "#19 %d\n", ID_TABLE_USE_CALC_VALUES);
         *valp = TABLE_VALUES(tbl)[index];
         fprintf(stderr, "#20\n");
-    #if ID_TABLE_SWAP_RECENT_ACCESS
-        if (index > 0) {
-            fprintf(stderr, "#20\n");
-            VALUE *values = TABLE_VALUES(tbl);
-            id_key_t tk = tbl->keys[index-1];
-            VALUE tv = values[index-1];
-            tbl->keys[index-1] = tbl->keys[index];
-            tbl->keys[index] = tk;
-            values[index-1] = values[index];
-            values[index] = tv;
-        }
-    #endif /* ID_TABLE_SWAP_RECENT_ACCESS */
+
         return TRUE;
     }
     else {
 	    return FALSE;
     }
-}
-
-static int
-hash_id_table_lookup(register sa_table *table, ID id, VALUE *valuep)
-{
-    fprintf(stderr, "#15\n");
-    register sa_entry *entry;
-    id_key_t key = id2key(id);
-
-    if (table->num_entries == 0) return 0;
-
-    entry = table->entries + calc_pos(table, key);
-    if (entry->next == SA_EMPTY) return 0;
-
-    if (entry->key == key) goto found;
-    if (entry->next == SA_LAST) return 0;
-
-    entry = table->entries + (entry->next - SA_OFFSET);
-    if (entry->key == key) goto found;
-
-    while(entry->next != SA_LAST) {
-        entry = table->entries + (entry->next - SA_OFFSET);
-        if (entry->key == key) goto found;
-    }
-    return 0;
-  found:
-    if (valuep) *valuep = entry->value;
-    return 1;
-}
-
-static int
-my_id_table_lookup(struct mix_id_table *tbl, ID id, VALUE *valp)
-{
-    fprintf(stderr, "#14\n");
-    if (LIST_P(tbl)) return list_id_table_lookup(&tbl->aux.list, id, valp);
-    else             return hash_id_table_lookup(&tbl->aux.hash, id, valp);
 }
 
 static inline rb_method_entry_t *
@@ -661,7 +783,7 @@ search_method(VALUE klass, ID id, VALUE *defined_class_ptr)
     }
 
     if (defined_class_ptr)
-	*defined_class_ptr = klass;
+	    *defined_class_ptr = klass;
     return me;
 }
 
@@ -685,6 +807,8 @@ process_line_event(VALUE trace_point, void *data)
     file = RSTRING_PTR(path);
     line = FIX2INT(lineno);
 
+    fprintf(stderr, "process_line_event %s %d\n", file, line);
+
     breakpoint = find_breakpoint_by_pos(file, line);
 
     context_object = Debase_current_context(mDebase);
@@ -699,6 +823,7 @@ process_line_event(VALUE trace_point, void *data)
     rb_iseq_t *iseq = cfp->iseq;
 
     if(context->should_step_in > 0) {
+        context->should_step_in = 0;
         fprintf(stderr, "context->should_step_in %s %d\n", file, line);
 
         int pc = cfp->pc - iseq->body->iseq_encoded;
@@ -712,9 +837,12 @@ process_line_event(VALUE trace_point, void *data)
         fprintf(stderr, "ci->orig_argc: %d\n", ci->orig_argc);
         VALUE klass = CLASS_OF(my_top_n(cfp, ci->orig_argc));
 
+        debug_print(klass);
+
         cc->me = search_method(klass, ci->mid, &defined_class);
 
         c_add_breakpoint_first_line(cc->me->def->body.iseq.iseqptr);
+        return;
     }
 
     context->iseq = cfp->iseq;

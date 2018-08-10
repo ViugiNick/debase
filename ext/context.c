@@ -378,8 +378,8 @@ Context_stop_next(int argc, VALUE *argv, VALUE self)
 
   trace_on_next(context->iseq, context->pc);
 
-  VALUE str = rb_iseq_disasm(context->iseq);
-  fprintf(stderr, "%s\n", StringValueCStr(str));
+  //VALUE str = rb_iseq_disasm(context->iseq);
+  //fprintf(stderr, "%s\n", StringValueCStr(str));
 
   context->cfp = TH_CFP(ruby_current_thread);
   context->stop_pc = context->step_in_info->variants[0]->pc;
