@@ -55,7 +55,6 @@ typedef struct step_in_variant_t
 {
     VALUE mid;
     rb_iseq_t *block_iseq;
-    int pc_offset;
     int pc;
 } step_in_variant_t;
 
@@ -70,8 +69,6 @@ typedef struct debug_context {
   int stack_size;
 
   VALUE thread;
-  rb_control_frame_t *cfp;
-  int stop_pc;
   step_in_info_t* step_in_info;
   int thnum;
   int flags;

@@ -1,4 +1,5 @@
 #include <debase_internals.h>
+#include <method_resolver.h>
 #include <hacks.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -14,13 +15,10 @@ static VALUE cContext;
 static int breakpoint_max = 0;
 
 static breakpoint_list_node_t* breakpoint_list = NULL;
-static breakpoint_list_node_t* checkpoint_list = NULL;
-
 
 static VALUE idAlive;
 static VALUE tpLine;
 static VALUE tpLine2;
-static VALUE tpCall;
 static VALUE tpRaise;
 static VALUE idAtLine;
 static VALUE idAtBreakpoint;
@@ -28,174 +26,6 @@ static VALUE idMpLoadIseq;
 static VALUE cDebugThread;
 static VALUE contexts;
 static VALUE breakpoints;
-
-#define         FALSE   0
-#define         TRUE    1
-
-#ifndef ID_TABLE_IMPL
-#define ID_TABLE_IMPL 34
-#endif
-
-#if ID_TABLE_IMPL == 0
-#define ID_TABLE_NAME st
-#define ID_TABLE_IMPL_TYPE struct st_id_table
-
-#define ID_TABLE_USE_ST 1
-#define ID_TABLE_USE_ST_DEBUG 1
-
-#elif ID_TABLE_IMPL == 1
-#define ID_TABLE_NAME st
-#define ID_TABLE_IMPL_TYPE struct st_id_table
-
-#define ID_TABLE_USE_ST 1
-#define ID_TABLE_USE_ST_DEBUG 0
-
-#elif ID_TABLE_IMPL == 11
-#define ID_TABLE_NAME list
-#define ID_TABLE_IMPL_TYPE struct list_id_table
-
-#define ID_TABLE_USE_LIST 1
-#define ID_TABLE_USE_CALC_VALUES 1
-
-#elif ID_TABLE_IMPL == 12
-#define ID_TABLE_NAME list
-#define ID_TABLE_IMPL_TYPE struct list_id_table
-
-#define ID_TABLE_USE_LIST 1
-#define ID_TABLE_USE_CALC_VALUES 1
-#define ID_TABLE_USE_ID_SERIAL 1
-
-#elif ID_TABLE_IMPL == 13
-#define ID_TABLE_NAME list
-#define ID_TABLE_IMPL_TYPE struct list_id_table
-
-#define ID_TABLE_USE_LIST 1
-#define ID_TABLE_USE_CALC_VALUES 1
-#define ID_TABLE_USE_ID_SERIAL 1
-#define ID_TABLE_SWAP_RECENT_ACCESS 1
-
-#elif ID_TABLE_IMPL == 14
-#define ID_TABLE_NAME list
-#define ID_TABLE_IMPL_TYPE struct list_id_table
-
-#define ID_TABLE_USE_LIST 1
-#define ID_TABLE_USE_CALC_VALUES 1
-#define ID_TABLE_USE_ID_SERIAL 1
-#define ID_TABLE_USE_LIST_SORTED 1
-
-#elif ID_TABLE_IMPL == 15
-#define ID_TABLE_NAME list
-#define ID_TABLE_IMPL_TYPE struct list_id_table
-
-#define ID_TABLE_USE_LIST 1
-#define ID_TABLE_USE_CALC_VALUES 1
-#define ID_TABLE_USE_ID_SERIAL 1
-#define ID_TABLE_USE_LIST_SORTED 1
-#define ID_TABLE_USE_LIST_SORTED_LINEAR_SMALL_RANGE 1
-
-#elif ID_TABLE_IMPL == 21
-#define ID_TABLE_NAME hash
-#define ID_TABLE_IMPL_TYPE sa_table
-
-#define ID_TABLE_USE_COALESCED_HASHING 1
-#define ID_TABLE_USE_ID_SERIAL 1
-
-#elif ID_TABLE_IMPL == 22
-#define ID_TABLE_NAME hash
-#define ID_TABLE_IMPL_TYPE struct hash_id_table
-
-#define ID_TABLE_USE_SMALL_HASH 1
-#define ID_TABLE_USE_ID_SERIAL 1
-
-#elif ID_TABLE_IMPL == 31
-#define ID_TABLE_NAME mix
-#define ID_TABLE_IMPL_TYPE struct mix_id_table
-
-#define ID_TABLE_USE_MIX 1
-#define ID_TABLE_USE_MIX_LIST_MAX_CAPA 32
-
-#define ID_TABLE_USE_ID_SERIAL 1
-
-#define ID_TABLE_USE_LIST 1
-#define ID_TABLE_USE_CALC_VALUES 1
-#define ID_TABLE_USE_SMALL_HASH 1
-
-#elif ID_TABLE_IMPL == 32
-#define ID_TABLE_NAME mix
-#define ID_TABLE_IMPL_TYPE struct mix_id_table
-
-#define ID_TABLE_USE_MIX 1
-#define ID_TABLE_USE_MIX_LIST_MAX_CAPA 32
-
-#define ID_TABLE_USE_ID_SERIAL 1
-
-#define ID_TABLE_USE_LIST 1
-#define ID_TABLE_USE_CALC_VALUES 1
-#define ID_TABLE_USE_LIST_SORTED 1
-
-#define ID_TABLE_USE_SMALL_HASH 1
-
-#elif ID_TABLE_IMPL == 33
-#define ID_TABLE_NAME mix
-#define ID_TABLE_IMPL_TYPE struct mix_id_table
-
-#define ID_TABLE_USE_MIX 1
-#define ID_TABLE_USE_MIX_LIST_MAX_CAPA 64
-
-#define ID_TABLE_USE_ID_SERIAL 1
-
-#define ID_TABLE_USE_LIST 1
-#define ID_TABLE_USE_CALC_VALUES 1
-#define ID_TABLE_USE_SMALL_HASH 1
-
-#elif ID_TABLE_IMPL == 34
-#define ID_TABLE_NAME mix
-#define ID_TABLE_IMPL_TYPE struct mix_id_table
-
-#define ID_TABLE_USE_MIX 1
-#define ID_TABLE_USE_MIX_LIST_MAX_CAPA 64
-
-#define ID_TABLE_USE_ID_SERIAL 1
-
-#define ID_TABLE_USE_LIST 1
-#define ID_TABLE_USE_CALC_VALUES 1
-#define ID_TABLE_USE_LIST_SORTED 1
-
-#define ID_TABLE_USE_SMALL_HASH 1
-
-#elif ID_TABLE_IMPL == 35
-#define ID_TABLE_NAME mix
-#define ID_TABLE_IMPL_TYPE struct mix_id_table
-
-#define ID_TABLE_USE_MIX 1
-#define ID_TABLE_USE_MIX_LIST_MAX_CAPA 64
-
-#define ID_TABLE_USE_ID_SERIAL 1
-
-#define ID_TABLE_USE_LIST 1
-#define ID_TABLE_USE_CALC_VALUES 1
-#define ID_TABLE_USE_LIST_SORTED 1
-#define ID_TABLE_USE_LIST_SORTED_LINEAR_SMALL_RANGE 1
-
-#define ID_TABLE_USE_SMALL_HASH 1
-
-#else
-#error
-#endif
-
-#if ID_TABLE_SWAP_RECENT_ACCESS && ID_TABLE_USE_LIST_SORTED
-#error
-#endif
-
-/* IMPL(create) will be "hash_id_table_create" and so on */
-#define IMPL1(name, op) TOKEN_PASTE(name, _id##op) /* expand `name' */
-#define IMPL(op)        IMPL1(ID_TABLE_NAME, _table##op) /* but prevent `op' */
-
-#ifdef __GNUC__
-# define UNUSED(func) static func __attribute__((unused))
-#else
-# define UNUSED(func) static func
-#endif
 
 #if RUBY_API_VERSION_CODE >= 20500
   #if (RUBY_RELEASE_YEAR == 2017 && RUBY_RELEASE_MONTH == 10 && RUBY_RELEASE_DAY == 10) //workaround for 2.5.0-preview1
@@ -207,76 +37,10 @@ static VALUE breakpoints;
   #define TH_CFP(thread) ((rb_control_frame_t *)(thread)->cfp)
 #endif
 
-typedef rb_id_serial_t id_key_t;
-
-typedef struct rb_id_item {
-    id_key_t key;
-#if SIZEOF_VALUE == 8
-    int      collision;
-#endif
-    VALUE    val;
-} item_t;
-
-#if SIZEOF_VALUE == 8
-#define ITEM_GET_KEY(tbl, i) ((tbl)->items[i].key)
-#define ITEM_KEY_ISSET(tbl, i) ((tbl)->items[i].key)
-#define ITEM_COLLIDED(tbl, i) ((tbl)->items[i].collision)
-#define ITEM_SET_COLLIDED(tbl, i) ((tbl)->items[i].collision = 1)
-#else
-#define ITEM_GET_KEY(tbl, i) ((tbl)->items[i].key >> 1)
-#define ITEM_KEY_ISSET(tbl, i) ((tbl)->items[i].key > 1)
-#define ITEM_COLLIDED(tbl, i) ((tbl)->items[i].key & 1)
-#define ITEM_SET_COLLIDED(tbl, i) ((tbl)->items[i].key |= 1)
-#endif
-
-#if ID_TABLE_USE_CALC_VALUES
-    #define TABLE_VALUES(tbl) ((VALUE *)((tbl)->keys + (tbl)->capa))
-#else
-    #define TABLE_VALUES(tbl) (tbl)->values_
-#endif
-
-struct list_id_table {
-    int capa;
-    int num;
-    id_key_t *keys;
-#if ID_TABLE_USE_CALC_VALUES == 0
-    VALUE *values_;
-#endif
-};
-
-struct rb_id_table {
-    int capa;
-    int num;
-    int used;
-    item_t *items;
-};
-
-static inline id_key_t
-id2key(ID id)
-{
-    return rb_id_to_serial(id);
-}
-
-static int
-list_table_index(struct list_id_table *tbl, id_key_t key)
-{
-    const int num = tbl->num;
-    const id_key_t *keys = tbl->keys;
-
-    int i;
-
-    for (i=0; i<num; i++) {
-    	assert(keys[i] != 0);
-
-        if (keys[i] == key) {
-            return (int)i;
-        }
-    }
-    return -1;
-}
-
 static int started = 0;
 
+
+//Cast VALUE-iseq to rb_iseq_t
 static const rb_iseq_t *
 iseqw_check(VALUE iseqw)
 {
@@ -297,56 +61,36 @@ static void add_traces(rb_iseq_t* iseq);
 struct set_specifc_data {
     int pos;
     int set;
-    int order;
     int prev; /* 1: set, 2: unset, 0: not found */
 };
 
+
+//set RUBY_EVENT_SPECIFIED_LINE event to line
 static int
 my_line_trace_specify(int line, rb_event_flag_t *events_ptr, void *ptr)
 {
     struct set_specifc_data *data = (struct set_specifc_data *)ptr;
 
     if (data->pos == line) {
-        if(data->order == 0) {
-            data->prev = *events_ptr & RUBY_EVENT_SPECIFIED_LINE ? 1 : 2;
-            if (data->set) {
-                *events_ptr = *events_ptr | RUBY_EVENT_SPECIFIED_LINE;
-            }
-            else {
-                *events_ptr = *events_ptr & ~RUBY_EVENT_SPECIFIED_LINE;
-            }
-            return 0; /* found */
+        data->prev = *events_ptr & RUBY_EVENT_SPECIFIED_LINE ? 1 : 2;
+        if (data->set) {
+            *events_ptr = *events_ptr | RUBY_EVENT_SPECIFIED_LINE;
         }
         else {
-            data->order--;
+            *events_ptr = *events_ptr & ~RUBY_EVENT_SPECIFIED_LINE;
         }
+        return 0; /* found */
     }
     return 1;
 }
 
-static int
-my_first_line_trace_specify(int line, rb_event_flag_t *events_ptr, void *ptr)
-{
-    struct set_specifc_data *data = (struct set_specifc_data *)ptr;
-
-    data->prev = *events_ptr & RUBY_EVENT_SPECIFIED_LINE ? 1 : 2;
-    if (data->set) {
-        *events_ptr = *events_ptr | RUBY_EVENT_SPECIFIED_LINE;
-    }
-    else {
-        *events_ptr = *events_ptr & ~RUBY_EVENT_SPECIFIED_LINE;
-    }
-    return 0;
-}
-
 VALUE
-my_rb_iseqw_line_trace_specify_order(VALUE iseqval, int needed_line, int order, VALUE set)
+my_rb_iseqw_line_trace_specify(VALUE iseqval, int needed_line, VALUE set)
 {
     struct set_specifc_data data;
 
     data.prev = 0;
     data.pos = needed_line;
-    data.order = order;
     if (data.pos < 0) rb_raise(rb_eTypeError, "`pos' is negative");
 
     switch (set) {
@@ -361,38 +105,6 @@ my_rb_iseqw_line_trace_specify_order(VALUE iseqval, int needed_line, int order, 
     return data.prev == 1 ? Qtrue : Qfalse;
 }
 
-VALUE
-my_rb_iseqw_line_trace_specify(VALUE iseqval, int needed_line, VALUE set)
-{
-    return my_rb_iseqw_line_trace_specify_order(iseqval, needed_line, 0, set);
-}
-
-VALUE
-my_rb_iseqw_first_line_trace_specify(VALUE iseqval, VALUE set)
-{
-    struct set_specifc_data data;
-
-    data.prev = 0;
-
-    switch (set) {
-      case Qtrue:  data.set = 1; break;
-      case Qfalse: data.set = 0; break;
-      default:
-	    rb_raise(rb_eTypeError, "`set' should be true/false");
-    }
-
-    rb_iseqw_line_trace_each(iseqval, my_first_line_trace_specify, (void *)&data);
-
-    return data.prev == 1 ? Qtrue : Qfalse;
-}
-
-static void debug_class_print(VALUE v) {
-    ID sym_puts = rb_intern("puts");
-    ID sym_inspect = rb_intern("class");
-    rb_funcall(rb_mKernel, sym_puts, 1,
-        rb_funcall(v, sym_inspect, 0));
-}
-
 static VALUE
 Debase_thread_context(VALUE self, const rb_thread_t* thread)
 {
@@ -400,7 +112,6 @@ Debase_thread_context(VALUE self, const rb_thread_t* thread)
   context = rb_hash_aref(contexts, (VALUE)thread);
   if (context == Qnil) {
     context = context_create(thread, cDebugThread);
-    debug_class_print(context);
     rb_hash_aset(contexts, thread, context);
   }
   return context;
@@ -414,19 +125,6 @@ Debase_current_context(VALUE self)
 
 static breakpoint_t* find_breakpoint_by_pos(char* path, int line) {
     breakpoint_list_node_t* breakpoint = breakpoint_list;
-
-    while(breakpoint != NULL) {
-        if(strcmp (breakpoint->breakpoint->source, path) == 0 && breakpoint->breakpoint->line == line) {
-            return breakpoint->breakpoint;
-        }
-        breakpoint = breakpoint->next;
-    }
-
-    return NULL;
-}
-
-static breakpoint_t* find_checkpoint_by_pos(char* path, int line) {
-    breakpoint_list_node_t* breakpoint = checkpoint_list;
 
     while(breakpoint != NULL) {
         if(strcmp (breakpoint->breakpoint->source, path) == 0 && breakpoint->breakpoint->line == line) {
@@ -485,18 +183,6 @@ call_at_line(debug_context_t *context, char *file, int line, VALUE context_objec
   rb_funcall(context_object, idAtLine, 2, rb_str_new2(file), INT2FIX(line));
 }
 
-static void debug_print(VALUE v) {
-    ID sym_puts = rb_intern("puts");
-    rb_funcall(rb_mKernel, sym_puts, 1, v);
-}
-
-static void debug_print_class(VALUE v) {
-    ID sym_puts = rb_intern("puts");
-    ID sym_inspect = rb_intern("class");
-    rb_funcall(rb_mKernel, sym_puts, 1,
-    rb_funcall(v, sym_inspect, 0));
-}
-
 rb_control_frame_t *
 my_rb_vm_get_binding_creatable_next_cfp(const rb_thread_t *th, const rb_control_frame_t *cfp)
 {
@@ -512,118 +198,64 @@ my_rb_vm_get_binding_creatable_next_cfp(const rb_thread_t *th, const rb_control_
 static step_in_info_t*
 get_step_in_info(rb_control_frame_t* cfp) {
     char type;
-    int n;
+    int n, i;
 
     step_in_info_t* ans = ALLOC(step_in_info_t);
     ans->size = 0;
 
-    if(cfp->iseq != NULL)
-    {
-        if(cfp->pc == NULL || cfp->iseq->body == NULL)
-        {
-            return Qnil;
-        }
-        else
-        {
-            const rb_iseq_t *iseq = cfp->iseq;
-            VALUE* code = rb_iseq_original_iseq(iseq);
-
-            char* file = RSTRING_PTR(StringValue(iseq->body->location.path));
-
-            ptrdiff_t pc = cfp->pc - cfp->iseq->body->iseq_encoded;
-            unsigned int size = cfp->iseq->body->iseq_size;
-
-            for (n = pc; n < size;) {
-                VALUE insn = code[n];
-                char * instruction_name = insn_name(insn);
-
-                const char *types = insn_op_types(insn);
-
-                for (int j = 0; type = types[j]; j++) {
-                    VALUE op = code[n + j + 1];
-
-                    if(type == 0) {
-                        break;
-                    }
-
-                    if(type == TS_CALLINFO) {
-                        struct rb_call_info *ci = (struct rb_call_info *)op;
-
-                        if (ci->mid) {
-                            if(strcmp(instruction_name, "send") == 0) {
-                                ans->size += 2;
-                            }
-                            if(strcmp(instruction_name, "opt_send_without_block") == 0) {
-                                ans->size++;
-                            }
-                        }
-                    }
-
-                }
-
-                n += insn_len(insn);
-            }
-
-            step_in_variant_t** variants = (step_in_variant_t*)malloc(ans->size + 1);
-            int i = 0;
-            VALUE mid_str = NULL;
-
-            for (int insn_iter = 0, n = pc; n < size; insn_iter++, mid_str = NULL) {
-                VALUE insn = code[n];
-                char * instruction_name = insn_name(insn);
-
-                const char *types = insn_op_types(insn);
-
-                for (int j = 0; type = types[j]; j++) {
-                    VALUE op = code[n + j + 1];
-
-                    if(type == 0) {
-                        return ans;
-                    }
-
-                    if(type == TS_CALLINFO) {
-                        struct rb_call_info *ci = (struct rb_call_info *)op;
-
-                        if (ci->mid) {
-                            if(strcmp(instruction_name, "send") == 0) {
-                                step_in_variant_t* variant = ALLOC(step_in_variant_t);
-                                variant->mid = rb_id2str(ci->mid);
-                                variant->pc_offset = insn_iter;
-                                variant->block_iseq = NULL;
-                                variant->pc = n + insn_len(insn);
-                                variants[i++] = variant;
-                                mid_str = rb_id2str(ci->mid);
-                            }
-                            if(strcmp(instruction_name, "opt_send_without_block") == 0) {
-                                step_in_variant_t* variant = ALLOC(step_in_variant_t);
-                                variant->mid = rb_id2str(ci->mid);
-                                variant->pc_offset = insn_iter;
-                                variant->block_iseq = NULL;
-                                variant->pc = n + insn_len(insn);
-                                variants[i++] = variant;
-                            }
-                        }
-                    }
-
-                    if(type == TS_ISEQ) {
-                        if(mid_str != NULL) {
-                            step_in_variant_t* variant = ALLOC(step_in_variant_t);
-                            variant->mid = rb_sprintf("block for %"PRIsVALUE, mid_str);
-                            variant->pc_offset = insn_iter;
-                            variant->block_iseq = op;
-                            variant->pc = n + insn_len(insn);
-                            variants[i++] = variant;
-
-                            mid_str = NULL;
-                        }
-                    }
-                }
-
-                n += insn_len(insn);
-            }
-            ans->variants = variants;
-        }
+    if(cfp == NULL || cfp->iseq == NULL || cfp->pc == NULL || cfp->iseq->body == NULL) {
+        return NULL;
     }
+
+    const rb_iseq_t *iseq = cfp->iseq;
+    VALUE* code = rb_iseq_original_iseq(iseq);
+
+    ptrdiff_t pc = cfp->pc - cfp->iseq->body->iseq_encoded;
+    unsigned int size = cfp->iseq->body->iseq_size;
+
+    for (n = pc; n < size;) {
+        VALUE insn = code[n];
+        char * instruction_name = insn_name(insn);
+
+        if(insn == BIN(send)) {
+            ans->size += 2;
+        }
+        if(insn == BIN(opt_send_without_block)) {
+            ans->size++;
+        }
+
+        n += insn_len(insn);
+    }
+
+    step_in_variant_t** variants = (step_in_variant_t*)malloc(ans->size + 1);
+
+    i = 0;
+    for (n = pc; n < size;) {
+        VALUE insn = code[n];
+        char * instruction_name = insn_name(insn);
+
+        if(insn == BIN(send) || insn == BIN(opt_send_without_block)) {
+            const char *types = insn_op_types(insn);
+            step_in_variant_t* variant = ALLOC(step_in_variant_t);
+
+            struct rb_call_info *ci = (struct rb_call_info *)code[n + 1];
+            variant->mid = rb_id2str(ci->mid);
+            variant->block_iseq = NULL;
+            variant->pc = n + insn_len(insn);
+            variants[i++] = variant;
+
+            if(insn == BIN(send)) {
+                step_in_variant_t* variant = ALLOC(step_in_variant_t);
+                variant->mid = rb_id2str(ci->mid);
+                variant->block_iseq = NULL;
+                variant->pc = n + insn_len(insn);
+                variants[i++] = variant;
+            }
+        }
+
+        n += insn_len(insn);
+    }
+
     return ans;
 }
 
@@ -637,7 +269,6 @@ static void trace_on_next(rb_iseq_t *iseq, int pc) {
         insn = iseq_original[pos];
 
         if (insn == BIN(trace)) {
-            fprintf(stderr, "trace_on_next %d\n", pos);
             rb_event_flag_t current_events;
 
             current_events = (rb_event_flag_t)iseq_original[pos+1];
@@ -647,16 +278,6 @@ static void trace_on_next(rb_iseq_t *iseq, int pc) {
             break;
         }
     }
-}
-
-void c_add_breakpoint_first_line(rb_iseq_t *iseq)
-{
-    VALUE str = rb_iseq_disasm(iseq);
-    fprintf(stderr, "c_add_breakpoint_first_line\n%s\n", StringValueCStr(str));
-    trace_on_next(iseq, 2);
-    str = rb_iseq_disasm(iseq);
-    fprintf(stderr, "after c_add_breakpoint_first_line\n%s\n", StringValueCStr(str));
-    //my_rb_iseqw_first_line_trace_specify(rb_iseqw_new(iseq), Qtrue);
 }
 
 static void
@@ -689,102 +310,8 @@ process_raise_event(VALUE trace_point, void *data)
   fprintf(stdout, "process raise %s:%d\n", file, line);
 }
 
-static void
-process_call_event(VALUE trace_point, void *data)
-{
-    VALUE path;
-    VALUE lineno;
-    VALUE context_object;
-    breakpoint_t* breakpoint;
-    debug_context_t *context;
-    rb_trace_point_t *tp;
-    char *file;
-    int line;
-    int n;
-    char type;
-
-    tp = TRACE_POINT;
-    path = rb_tracearg_path(tp);
-    lineno = rb_tracearg_lineno(tp);
-    file = RSTRING_PTR(path);
-    line = FIX2INT(lineno);
-
-    context_object = Debase_current_context(mDebase);
-    Data_Get_Struct(context_object, debug_context_t, context);
-
-    rb_thread_t *thread;
-    rb_control_frame_t *cfp;
-    thread = ruby_current_thread;
-    cfp = TH_CFP(thread);
-    rb_control_frame_t *prev_cfp = cfp + 1;
-
-    int pc = prev_cfp->pc - prev_cfp->iseq->body->iseq_encoded;
-
-    if(pc == context->stop_pc) {
-        c_add_breakpoint_first_line(cfp->iseq);
-        Debase_call_tracepoint_disable();
-    }
-}
-
 static VALUE my_top_n(const rb_control_frame_t *cfp, int n) {
     return (*(cfp->sp -(n) - 1));
-}
-
-typedef rb_id_serial_t id_key_t;
-
-int
-my_id_table_lookup(struct list_id_table *tbl, ID id, VALUE *valp)
-{
-    fprintf(stderr, "#14 %d %d\n", tbl->capa, tbl->num);
-    id_key_t key = id2key(id);
-    int index = list_table_index(tbl, key);
-    fprintf(stderr, "#18\n");
-    if (index >= 0) {
-        fprintf(stderr, "#19 %d\n", ID_TABLE_USE_CALC_VALUES);
-        *valp = TABLE_VALUES(tbl)[index];
-        fprintf(stderr, "#20\n");
-
-        return TRUE;
-    }
-    else {
-	    return FALSE;
-    }
-}
-
-static inline rb_method_entry_t *
-lookup_method_table(VALUE klass, ID id)
-{
-    fprintf(stderr, "#11\n");
-    st_data_t body;
-    fprintf(stderr, "#11'\n");
-    struct rb_id_table *m_tbl = RMODULE_M_TBL(klass);
-
-    fprintf(stderr, "#12\n");
-
-    if (my_id_table_lookup(m_tbl, id, &body)) {
-	    fprintf(stderr, "#13\n");
-	    return (rb_method_entry_t *) body;
-    }
-    else {
-	    return 0;
-    }
-}
-
-static inline rb_method_entry_t*
-search_method(VALUE klass, ID id, VALUE *defined_class_ptr)
-{
-    rb_method_entry_t *me;
-
-    for (me = 0; klass; klass = RCLASS_SUPER(klass)) {
-	    fprintf(stderr, "#1\n");
-	    if ((me = lookup_method_table(klass, id)) != 0)
-	        break;
-	    fprintf(stderr, "#2\n");
-    }
-
-    if (defined_class_ptr)
-	    *defined_class_ptr = klass;
-    return me;
 }
 
 static void
@@ -807,9 +334,11 @@ process_line_event(VALUE trace_point, void *data)
     file = RSTRING_PTR(path);
     line = FIX2INT(lineno);
 
-    fprintf(stderr, "process_line_event %s %d\n", file, line);
-
     breakpoint = find_breakpoint_by_pos(file, line);
+    if(breakpoint == NULL) {
+
+    }
+
 
     context_object = Debase_current_context(mDebase);
     Data_Get_Struct(context_object, debug_context_t, context);
@@ -824,24 +353,19 @@ process_line_event(VALUE trace_point, void *data)
 
     if(context->should_step_in > 0) {
         context->should_step_in = 0;
-        fprintf(stderr, "context->should_step_in %s %d\n", file, line);
 
         int pc = cfp->pc - iseq->body->iseq_encoded;
-        printf("pc = %d\n", pc);
         VALUE* code = rb_iseq_original_iseq(iseq);
 
         struct rb_call_info *ci = (struct rb_call_info *)code[pc + 1];
         struct rb_call_cache *cc = (struct rb_call_cache *)code[pc + 2];
 
         VALUE defined_class;
-        fprintf(stderr, "ci->orig_argc: %d\n", ci->orig_argc);
         VALUE klass = CLASS_OF(my_top_n(cfp, ci->orig_argc));
-
-        debug_print(klass);
 
         cc->me = search_method(klass, ci->mid, &defined_class);
 
-        c_add_breakpoint_first_line(cc->me->def->body.iseq.iseqptr);
+        trace_on_next(cc->me->def->body.iseq.iseqptr, 2);
         return;
     }
 
@@ -878,26 +402,6 @@ Debase_setup_tracepoints(VALUE self)
 
   tpRaise = rb_tracepoint_new(Qnil, RUBY_EVENT_RAISE, process_raise_event, NULL);
   rb_global_variable(&tpRaise);
-
-  return Qnil;
-}
-
-VALUE
-Debase_call_tracepoint_enable()
-{
-  tpCall = rb_tracepoint_new(Qnil, RUBY_EVENT_CALL, process_call_event, NULL);
-  rb_global_variable(&tpCall);
-
-  rb_tracepoint_enable(tpCall);
-  rb_tracepoint_enable(tpRaise);
-
-  return Qnil;
-}
-
-VALUE
-Debase_call_tracepoint_disable()
-{
-  rb_tracepoint_disable(tpCall);
 
   return Qnil;
 }
@@ -1043,21 +547,18 @@ Debase_contexts(VALUE self)
 }
 
 static VALUE
-Debase_debug_load(int argc, VALUE *argv, VALUE self)
-{
+Debase_debug_load(int argc, VALUE *argv, VALUE self) {
     VALUE file, stop, increment_start;
     int state;
 
-    if(rb_scan_args(argc, argv, "12", &file, &stop, &increment_start) == 1)
-    {
+    if(rb_scan_args(argc, argv, "12", &file, &stop, &increment_start) == 1) {
         stop = Qfalse;
         increment_start = Qtrue;
     }
     Debase_setup_tracepoints(self);
-    //debase_prepare_context(self, file, stop);
     rb_load_protect(file, 0, &state);
-    if (0 != state)
-    {
+
+    if (0 != state) {
         return rb_errinfo();
     }
     return Qnil;

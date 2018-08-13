@@ -30,11 +30,6 @@ reset_stepping_stop_points(debug_context_t *context)
   context->stop_next  = -1;
 }
 
-static void debug_print(VALUE v) {
-    ID sym_puts = rb_intern("puts");
-    rb_funcall(rb_mKernel, sym_puts, 1, v);
-}
-
 static inline VALUE
 Context_thnum(VALUE self) {
   debug_context_t *context;
@@ -176,13 +171,6 @@ Context_mark(debug_context_t *context)
 static void
 Context_free(debug_context_t *context) {
   xfree(context);
-}
-
-static void debug_class_print(VALUE v) {
-    ID sym_puts = rb_intern("puts");
-    ID sym_inspect = rb_intern("class");
-    rb_funcall(rb_mKernel, sym_puts, 1,
-        rb_funcall(v, sym_inspect, 0));
 }
 
 extern VALUE
@@ -349,7 +337,6 @@ static void trace_on_next(rb_iseq_t *iseq, int pc) {
         insn = iseq_original[pos];
 
         if (insn == BIN(trace)) {
-            fprintf(stderr, "trace_on_next %d\n", pos);
             rb_event_flag_t current_events;
 
             current_events = (rb_event_flag_t)iseq_original[pos+1];
@@ -364,6 +351,7 @@ static void trace_on_next(rb_iseq_t *iseq, int pc) {
 static VALUE
 Context_stop_next(int argc, VALUE *argv, VALUE self)
 {
+  fprintf(stderr, "Context_stop_next\n");
   VALUE steps;
   VALUE force;
   debug_context_t *context;
@@ -377,17 +365,12 @@ Context_stop_next(int argc, VALUE *argv, VALUE self)
   context->should_step_in = 1;
 
   trace_on_next(context->iseq, context->pc);
-
-  //VALUE str = rb_iseq_disasm(context->iseq);
-  //fprintf(stderr, "%s\n", StringValueCStr(str));
-
-  context->cfp = TH_CFP(ruby_current_thread);
-  context->stop_pc = context->step_in_info->variants[0]->pc;
 }
 
 static VALUE
 Context_smart_step(VALUE self, VALUE rb_variant_id, VALUE force)
 {
+  fprintf(stderr, "Context_smart_step\n");
   int variant_id;
   variant_id = FIX2INT(rb_variant_id);
 
@@ -401,30 +384,23 @@ Context_smart_step(VALUE self, VALUE rb_variant_id, VALUE force)
     c_add_breakpoint_first_line(variant->block_iseq);
     return;
   }
-
-  context->cfp = TH_CFP(ruby_current_thread);
-  context->stop_pc = variant->pc;
 }
 
 static VALUE
 Context_step_over(int argc, VALUE *argv, VALUE self)
 {
-  VALUE lines, frame, force;
-  debug_context_t *context;
+    fprintf(stderr, "Context_step_over\n");
+    VALUE lines, frame, force;
+    debug_context_t *context;
 
-  Data_Get_Struct(self, debug_context_t, context);
+    Data_Get_Struct(self, debug_context_t, context);
 
-  if(context->stack_size == 0)
+    if(context->stack_size == 0)
     rb_raise(rb_eRuntimeError, "No frames collected.");
 
-  rb_scan_args(argc, argv, "12", &lines, &frame, &force);
+    rb_scan_args(argc, argv, "12", &lines, &frame, &force);
 
-  rb_control_frame_t *cfp = TH_CFP(ruby_current_thread);
-
-  cfp += 10;
-
-  debug_print(cfp->iseq->body->location.path);
-  debug_print(cfp->iseq->body->location.first_lineno);
+    rb_control_frame_t *cfp = TH_CFP(ruby_current_thread);
 }
 
 static VALUE
